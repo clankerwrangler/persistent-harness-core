@@ -4,7 +4,7 @@
 \*   src/skills.mjs sha256:551248176ce363178846a1aa0df86d7ce7630c1194a4875f30c2af395ac68348
 \*   src/session-paths.mjs sha256:ae6d874326de8ad3a8bfb82a52fb9c512259de58068ad691e101dc308b568d5a
 \*   src/supervisor.mjs sha256:8873880511b6679f9a6b6d0d3d3657c72b54e1512f7f853bbaf7f09b24b49eb9
-\*   src/core-worker.mjs sha256:3ff43ed8d6069ca2d57f82e2714e05beeed4b99c8cf8937ac0a67191e3990615
+\*   src/core-worker.mjs sha256:1600668c3a25dfd8d336a7eccb59928b5cb80d1ab424c0b9b1746e9bf2cf4a2e
 \*   src/python-tool.mjs sha256:7e2c7920cc66109f0e473759f8703c272a4a99121556ae3e8dd124f85d35b075
 EXTENDS Naturals, FiniteSets
 CONSTANTS Actors, ReadyUsesDesired, SnapshotUsesDesired

@@ -1,6 +1,6 @@
 -------------------------- MODULE ModelCatalogRefresh --------------------------
 \* Sources:
-\*   src/core-worker.mjs sha256:3ff43ed8d6069ca2d57f82e2714e05beeed4b99c8cf8937ac0a67191e3990615
+\*   src/core-worker.mjs sha256:1600668c3a25dfd8d336a7eccb59928b5cb80d1ab424c0b9b1746e9bf2cf4a2e
 \*   src/host-handlers.mjs sha256:8571f6ec6f51d4ce085843d02ecdfe30d775a54ba2dceb21d67d5c230c9c5b8a
 EXTENDS Naturals
 CONSTANT Requests

@@ -53,7 +53,8 @@ function fakeProvider(decide) {
 }
 
 // `models`: [provider, id] pairs the fake provider serves; roots start on the first.
-async function harness(t, decide, { models: served = [["test", "m"]] } = {}) {
+// `signedIn: false` leaves the core without any sign-in.
+async function harness(t, decide, { models: served = [["test", "m"]], signedIn = true } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "core-e2e-"));
   const cwd = path.join(root, "project");
   const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(root, "agent");
@@ -64,7 +65,7 @@ async function harness(t, decide, { models: served = [["test", "m"]] } = {}) {
   const models = path.join(root, "models.json"), auth = path.join(root, "auth.json");
   await writeFile(models, JSON.stringify({ models: Object.fromEntries(served.map(([provider, id]) => [id,
     { provider, id, name: id, api: "openai-responses", baseUrl: base, contextWindow: 100_000, reasoning: false }])) }));
-  await writeFile(auth, JSON.stringify(Object.fromEntries(served.map(([provider]) => [provider, { type: "api_key", key: "t" }]))), { mode: 0o600 });
+  await writeFile(auth, JSON.stringify(signedIn ? Object.fromEntries(served.map(([provider]) => [provider, { type: "api_key", key: "t" }])) : {}), { mode: 0o600 });
   const previous = { PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, PI_HARNESS_CORE_ARGS: process.env.PI_HARNESS_CORE_ARGS };
   process.env.PI_CODING_AGENT_DIR = agentDir;
   process.env.PI_HARNESS_CORE_ARGS = JSON.stringify(["--models", models, "--auth", auth, "--catalog", path.join(root, "catalog"), "--agent-dir", agentDir]);
@@ -175,6 +176,18 @@ test("a root session runs on the core: streamed live, saved, shown under one id"
   }, "the failure record and its receipt");
   assert.equal(saved.failure.data.turnId, failures[0].turnId);
   assert.equal(saved.receipt.data.entryId, saved.failure.id);
+});
+
+test("a turn the core cannot sign in for is reported as failed, never dropped silently", { skip: !ready && "core binary not configured" }, async (t) => {
+  const h = await harness(t, () => ({ text: "never sent" }), { signedIn: false });
+  const id = await h.root("signed-out");
+  const failures = [], store = h.supervisor.store, record = store.recordActorTurnFailure.bind(store);
+  store.recordActorTurnFailure = (...args) => { failures.push(args[2]); return record(...args); };
+  await send(h, id, "hello");
+  await until(() => failures.length === 1, "the failure report");
+  assert.equal(failures[0].failureClass, "request_preparation");
+  assert.equal(failures[0].dispatchBoundary, "before_provider_dispatch");
+  assert.equal(h.bodies.length, 0, "nothing reached the provider");
 });
 
 test("Python, a forked child, a family message and a cron run, on the core", { skip: !runtimeReady && "kernel runtime not available", timeout: 300_000 }, async (t) => {

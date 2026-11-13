@@ -1,7 +1,7 @@
 ---------------------------- MODULE SessionFastMode ----------------------------
 \* Sources:
 \*   src/fast-mode.mjs sha256:497e7699c395663ebff315b0244e14f06b43b46885823a8d0c42cccc63d71554
-\*   src/core-worker.mjs sha256:3ff43ed8d6069ca2d57f82e2714e05beeed4b99c8cf8937ac0a67191e3990615
+\*   src/core-worker.mjs sha256:1600668c3a25dfd8d336a7eccb59928b5cb80d1ab424c0b9b1746e9bf2cf4a2e
 \*   src/store.mjs sha256:d98357b843f4e0e5317f3bb219dd4692078eb55ecb29f02a27a974c21e844bcf
 EXTENDS Naturals
 CONSTANT Sessions

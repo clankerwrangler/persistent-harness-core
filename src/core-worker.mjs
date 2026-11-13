@@ -127,8 +127,10 @@ export class CoreWorker {
       onRecorded: async (_report, journal) => { await this.core.record(TURN_FAILURE_ACCEPTED_TYPE, { version: 1, entryId: journal.entryId }); } });
     this.turnToolCalls = false;
     core.on("event", (event) => this.#onCoreEvent(event));
-    // The request could not be prepared (the harness's prompt parts, its inputs): nothing was sent.
-    core.on("handler_error", ({ op }) => { if (op === "prepared") void this.#turnFailed("request_preparation", "before_provider_dispatch"); });
+    // The request (the harness's prompt parts, its inputs) or a sign-in could not be supplied:
+    // the core cancels the turn before sending anything. Report it, or the message would
+    // simply go unanswered.
+    core.on("handler_error", ({ op }) => { if (op === "prepared" || op === "credentials") void this.#turnFailed("request_preparation", "before_provider_dispatch"); });
   }
 
   get model() {
