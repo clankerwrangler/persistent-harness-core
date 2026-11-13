@@ -53,11 +53,13 @@ function fakeProvider(decide) {
 }
 
 // `models`: [provider, id] pairs the fake provider serves; roots start on the first.
-// `signedIn: false` leaves the core without any sign-in.
-async function harness(t, decide, { models: served = [["test", "m"]], signedIn = true } = {}) {
+// `signedIn: false` leaves the core without any sign-in; `settings` gives the agent folder
+// (then its own) a settings.json.
+async function harness(t, decide, { models: served = [["test", "m"]], signedIn = true, settings = null } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "core-e2e-"));
   const cwd = path.join(root, "project");
-  const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(root, "agent");
+  const agentDir = settings ? path.join(root, "agent") : process.env.PI_CODING_AGENT_DIR ?? path.join(root, "agent");
+  if (settings) { await mkdir(agentDir, { recursive: true }); await writeFile(path.join(agentDir, "settings.json"), JSON.stringify(settings)); }
   await mkdir(cwd); await mkdir(agentDir, { recursive: true });
   const provider = fakeProvider(decide);
   await new Promise((resolve) => provider.server.listen(0, "127.0.0.1", resolve));
@@ -82,8 +84,9 @@ async function harness(t, decide, { models: served = [["test", "m"]], signedIn =
   await h.supervisor.start();
   h.client = new HarnessClient({ socketPath: path.join(root, "s.sock"), heartbeatMs: 0, requestTimeoutMs: 120_000 });
   await h.client.start({ registrationType: "register_client", clientInstanceId: crypto.randomUUID() });
-  h.root = async (name) => {
-    const { admission } = await h.client.request("create_root", { cwd, repositoryRoot: null, name, provider: served[0][0], model: served[0][1], thinkingLevel: null });
+  h.root = async (name, { unnamedModel = false } = {}) => {
+    const model = unnamedModel ? {} : { provider: served[0][0], model: served[0][1] };
+    const { admission } = await h.client.request("create_root", { cwd, repositoryRoot: null, name, ...model, thinkingLevel: null });
     await h.client.request("subscribe_session", { selector: admission.sessionId });
     return admission.sessionId;
   };
@@ -188,6 +191,19 @@ test("a turn the core cannot sign in for is reported as failed, never dropped si
   assert.equal(failures[0].failureClass, "request_preparation");
   assert.equal(failures[0].dispatchBoundary, "before_provider_dispatch");
   assert.equal(h.bodies.length, 0, "nothing reached the provider");
+});
+
+test("a session that names no model starts on the settings' default model and thinking level", { skip: !ready && "core binary not configured" }, async (t) => {
+  const h = await harness(t, () => ({ text: "DEFAULT_REPLY" }), { models: [["test", "m"], ["test", "other"]],
+    settings: { defaultProvider: "test", defaultModel: "other", defaultThinkingLevel: "high" } });
+  const id = await h.root("no-model", { unnamedModel: true });
+  await send(h, id, "hello");
+  assert.deepEqual(await replyTexts(h, id), ["DEFAULT_REPLY"]);
+  assert.equal(h.bodies[0].model, "other");
+  // The choice is kept: after the worker stops, the session continues on the same model.
+  await h.client.request("stop_session", { sessionId: id });
+  await send(h, id, "again");
+  assert.equal(h.bodies[1].model, "other");
 });
 
 test("Python, a forked child, a family message and a cron run, on the core", { skip: !runtimeReady && "kernel runtime not available", timeout: 300_000 }, async (t) => {

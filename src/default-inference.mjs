@@ -46,6 +46,16 @@ export function readDefaultModel(settingsPath) {
   return { provider: settings.defaultProvider, model: settings.defaultModel };
 }
 
+/** The default for a session that names no model, as pi used it: provider, model and
+ * thinking level from settings.json. Null when the settings are missing or name none. */
+export function readDefaultInference(settingsPath) {
+  let settings;
+  try { settings = JSON.parse(readFileSync(settingsPath, "utf8")); } catch { return null; }
+  if (typeof settings?.defaultProvider !== "string" || typeof settings?.defaultModel !== "string") return null;
+  return { provider: settings.defaultProvider, model: settings.defaultModel,
+    thinkingLevel: typeof settings.defaultThinkingLevel === "string" ? settings.defaultThinkingLevel : null };
+}
+
 export function writeDefaultModel(settingsPath, provider, model) {
   const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
   const temporary = `${settingsPath}.${process.pid}.tmp`;

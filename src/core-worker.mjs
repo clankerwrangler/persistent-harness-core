@@ -29,6 +29,7 @@ import { TURN_FAILURE_ACCEPTED_TYPE, TURN_FAILURE_ENTRY_TYPE, TurnFailureReporte
 import { inputIdForEntry } from "./conversation-projection.mjs";
 import { fastModeOptions, supportsFastMode } from "./fast-mode.mjs";
 import { MessageClock } from "./message-time.mjs";
+import { readDefaultInference } from "./default-inference.mjs";
 import { locationBlock } from "./input-location.mjs";
 import {
   INCOMING_MESSAGE_TYPE, KERNEL_SCRIPT, PYTHON_RUNTIME_SUPPORT, USAGE_ENTRY_TYPE, actorSkillGrant, applyActorSkillGrant,
@@ -146,7 +147,17 @@ export class CoreWorker {
     if (options.provider) await this.core.setModel({ provider: options.provider, model: options.model });
     if (options.thinking) await this.core.setModel({ reasoning: options.thinking });
     // The core keeps the current choice; asking with no change reads it.
-    const current = await this.core.setModel({});
+    let current = await this.core.setModel({});
+    // A session that names no model starts on the settings' default, as pi did; the core
+    // keeps it, so later starts read it back.
+    if (!current.model) {
+      const fallback = readDefaultInference(path.join(this.agentDir, "settings.json"));
+      if (fallback) {
+        await this.core.setModel({ provider: fallback.provider, model: fallback.model });
+        if (fallback.thinkingLevel && !current.reasoning) await this.core.setModel({ reasoning: fallback.thinkingLevel });
+        current = await this.core.setModel({});
+      }
+    }
     this.selected = { model: current.model ?? null, reasoning: current.reasoning ?? null };
     await this.#refreshModels();
     // In this chunk: messages already delivered are not delivered again, and replies

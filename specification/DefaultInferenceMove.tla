@@ -1,6 +1,6 @@
 ---------------------- MODULE DefaultInferenceMove ----------------------
 \* Sources:
-\*   src/default-inference.mjs sha256:359b5bcb6ad444477af7a769231e343b543ab14f49211045c23b8eecb51016e4
+\*   src/default-inference.mjs sha256:43e2beb60f8daa7aebc7d0d58025a47a7222ce63f3bd889221366453520227cd
 \*   src/store.mjs sha256:d98357b843f4e0e5317f3bb219dd4692078eb55ecb29f02a27a974c21e844bcf
 \*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
 EXTENDS Naturals

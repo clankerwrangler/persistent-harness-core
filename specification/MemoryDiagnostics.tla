@@ -1,7 +1,7 @@
 -------------------- MODULE MemoryDiagnostics --------------------
 \* Sources:
 \*   src/kernel.mjs sha256:086b1e9aa5ca892fa4035a67abab043dad664b5f95ea829a01dab28f3bd525b6
-\*   src/core-worker.mjs sha256:1600668c3a25dfd8d336a7eccb59928b5cb80d1ab424c0b9b1746e9bf2cf4a2e
+\*   src/core-worker.mjs sha256:bb186881aaf119c4f2575c69f016b0c5c378270770968b36df8b14fe5cae1410
 \*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
 \*   src/protocol.mjs sha256:7ba26d46123b8ba767d9255104d7ddf558c7726cacb7604e65d425749ae1ea6e
 EXTENDS Naturals, TLC
