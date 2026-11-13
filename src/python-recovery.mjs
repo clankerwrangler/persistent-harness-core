@@ -9,6 +9,10 @@ const SELECT = Object.freeze({
     "namespaceCheckpointState", "nativeAsyncRecovery", "executionId", "executionOk", "ok"],
 });
 
+/** The top-level tool-result detail fields recovery reads: the daily cleanup keeps these
+ * when it deletes old tool output, so recovery sees old calls as before, not expired. */
+export const RECOVERY_DETAIL_FIELDS = Object.freeze([...new Set(SELECT.details.map((field) => field.split(".")[0]))]);
+
 export function projectNamespaceRecovery(entries, restore) {
   const results = entries.filter((entry) => entry.type === "message"
     && entry.message?.role === "toolResult" && entry.message.toolName === "ipython");

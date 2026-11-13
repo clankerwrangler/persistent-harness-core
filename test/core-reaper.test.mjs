@@ -2,10 +2,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { CoreReaper, coreReap, REAP_AGE_SECONDS } from "../src/core-reaper.mjs";
+import { RECOVERY_DETAIL_FIELDS } from "../src/python-recovery.mjs";
 
 async function folder(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "core-reaper-"));
@@ -63,11 +64,12 @@ test("the core deletes only old unreferenced tool output, keeps messages and the
   const old = "2026-01-01T00:00:00.000Z", now = new Date().toISOString();
   const line = (...values) => values.map((v) => JSON.stringify(v)).join("\n") + "\n";
   const tool = (n, t, key) => ({ n, t, k: "tool", m: { role: "toolResult", toolCallId: `c${n}`, toolName: "ipython",
-    content: { $ref: { f: "payload", k: key } }, isError: false } });
+    content: { $ref: { f: "payload", k: key } }, details: { $ref: { f: "payload", k: `${key}d` } }, isError: false } });
   await mkdir(path.join(session, "log"), { recursive: true }); await mkdir(path.join(session, "checkpoints"));
   await writeFile(path.join(session, "meta.json"), JSON.stringify({ format: 1, id: "s", created: old }));
   await writeFile(path.join(session, "log/000001.jsonl"), line({ n: 1, t: old, k: "chunk" }, tool(2, old, "2.0")));
-  await writeFile(path.join(session, "log/000001.payload.jsonl"), line({ key: "2.0", v: [{ type: "text", text: "old output" }] }));
+  await writeFile(path.join(session, "log/000001.payload.jsonl"), line({ key: "2.0", v: [{ type: "text", text: "old output" }] },
+    { key: "2.0d", v: { executionId: "e1", ok: true, namespaceCheckpoint: { version: 1, executionId: "e1" }, stdout: "bulky printout" } }));
   await writeFile(path.join(session, "log/000001.reasoning.jsonl"), line({ key: "2.r", v: "old thinking" }));
   await writeFile(path.join(session, "log/000002.jsonl"), line({ n: 3, t: now, k: "chunk" }, { n: 4, t: now, k: "checkpoint", id: "c1" }, tool(5, now, "5.0")));
   await writeFile(path.join(session, "log/000002.payload.jsonl"), line({ key: "5.0", v: [{ type: "text", text: "current" }] }));
@@ -77,6 +79,13 @@ test("the core deletes only old unreferenced tool output, keeps messages and the
   assert.deepEqual(result.deleted, ["log/000001.payload.jsonl", "log/000001.reasoning.jsonl"]);
   assert.ok(result.bytes > 0);
   assert.ok(existsSync(path.join(session, "log/000001.jsonl")), "messages stay");
+  // Python recovery's facts are kept; the bulky printout is not.
+  const kept = (await readFile(path.join(session, "log/000001.kept.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(kept[0].fields, [...RECOVERY_DETAIL_FIELDS]);
+  assert.deepEqual(kept[1], { key: "2.0d", v: { executionId: "e1", ok: true, namespaceCheckpoint: { version: 1, executionId: "e1" } } });
+  for (const field of ["namespaceCheckpoint", "namespaceCheckpointAttempt", "namespaceCheckpointState", "nativeAsyncRecovery", "executionId", "executionOk", "ok"]) {
+    assert.ok(RECOVERY_DETAIL_FIELDS.includes(field), `recovery's ${field} is kept`);
+  }
   assert.ok(existsSync(path.join(session, "log/000002.payload.jsonl")), "the current chunk stays");
   assert.deepEqual((await coreReap(session, REAP_AGE_SECONDS)).deleted, [], "a second pass finds nothing");
   await assert.rejects(coreReap(path.join(dir, "missing"), REAP_AGE_SECONDS));

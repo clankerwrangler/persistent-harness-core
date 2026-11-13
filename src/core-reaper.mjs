@@ -6,16 +6,19 @@ import { execFile } from "node:child_process";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { coreBinary } from "./core-session.mjs";
+import { RECOVERY_DETAIL_FIELDS } from "./python-recovery.mjs";
 
 export const REAP_AGE_SECONDS = 14 * 24 * 60 * 60;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FIRST_RUN_DELAY_MS = 10 * 60 * 1000;
 const REAP_TIMEOUT_MS = 10 * 60 * 1000;
 
-/** `core reap <dir> <age>`: resolves to `{ deleted: [files], bytes }`; rejects on failure. */
-export function coreReap(dir, ageSeconds, env = process.env) {
+/** `core reap <dir> <age> --keep-details <fields>`: resolves to `{ deleted: [files], bytes }`;
+ * rejects on failure. The named detail fields of old tool results are kept. */
+export function coreReap(dir, ageSeconds, { keepDetails = RECOVERY_DETAIL_FIELDS, env = process.env } = {}) {
+  const keep = keepDetails.length ? ["--keep-details", keepDetails.join(",")] : [];
   return new Promise((resolve, reject) => {
-    execFile(coreBinary(env), ["reap", dir, String(ageSeconds)], { env, timeout: REAP_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
+    execFile(coreBinary(env), ["reap", dir, String(ageSeconds), ...keep], { env, timeout: REAP_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
       (error, stdout) => {
         if (error) return reject(error);
         try {
