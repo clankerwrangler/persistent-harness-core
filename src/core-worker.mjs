@@ -148,13 +148,14 @@ export class CoreWorker {
     if (options.thinking) await this.core.setModel({ reasoning: options.thinking });
     // The core keeps the current choice; asking with no change reads it.
     let current = await this.core.setModel({});
-    // A session that names no model starts on the settings' default, as pi did; the core
-    // keeps it, so later starts read it back.
+    // A session that names no model starts on the settings' default, as pi did. Model and
+    // thinking level are set in one call, so an interruption cannot keep one without the
+    // other; the core keeps them, so later starts read them back.
     if (!current.model) {
       const fallback = readDefaultInference(path.join(this.agentDir, "settings.json"));
       if (fallback) {
-        await this.core.setModel({ provider: fallback.provider, model: fallback.model });
-        if (fallback.thinkingLevel && !current.reasoning) await this.core.setModel({ reasoning: fallback.thinkingLevel });
+        const reasoning = current.reasoning ?? fallback.thinkingLevel;
+        await this.core.setModel({ provider: fallback.provider, model: fallback.model, ...(reasoning ? { reasoning } : {}) });
         current = await this.core.setModel({});
       }
     }

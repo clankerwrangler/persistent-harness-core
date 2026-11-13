@@ -1,6 +1,6 @@
 ----------------------- MODULE SessionInference -----------------------
 \* Sources:
-\*   src/core-worker.mjs sha256:bb186881aaf119c4f2575c69f016b0c5c378270770968b36df8b14fe5cae1410
+\*   src/core-worker.mjs sha256:9d4cc1e0957a339276306c7aaffe806593ca2315ad0bb65c7b57731160433bfe
 \*   src/store.mjs sha256:d98357b843f4e0e5317f3bb219dd4692078eb55ecb29f02a27a974c21e844bcf
 \*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
 EXTENDS Integers, TLC

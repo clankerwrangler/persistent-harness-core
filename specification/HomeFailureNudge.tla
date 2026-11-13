@@ -2,7 +2,7 @@
 \* Sources:
 \*   src/home-failure-nudge.mjs sha256:d733501fa1eb47724afcce40fd5d09a9011f3b448f35d95efbfed7be25ac62b0
 \*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
-\*   src/core-worker.mjs sha256:bb186881aaf119c4f2575c69f016b0c5c378270770968b36df8b14fe5cae1410
+\*   src/core-worker.mjs sha256:9d4cc1e0957a339276306c7aaffe806593ca2315ad0bb65c7b57731160433bfe
 
 \* Nobody observes Home's own failed run, so the supervisor nudges it later.
 \* Its failure report travels on the control socket, its settle on the event

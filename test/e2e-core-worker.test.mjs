@@ -54,7 +54,7 @@ function fakeProvider(decide) {
 
 // `models`: [provider, id] pairs the fake provider serves; roots start on the first.
 // `signedIn: false` leaves the core without any sign-in; `settings` gives the agent folder
-// (then its own) a settings.json.
+// (then its own) a settings.json and makes the models reasoning ones.
 async function harness(t, decide, { models: served = [["test", "m"]], signedIn = true, settings = null } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "core-e2e-"));
   const cwd = path.join(root, "project");
@@ -66,12 +66,12 @@ async function harness(t, decide, { models: served = [["test", "m"]], signedIn =
   const base = `http://127.0.0.1:${provider.server.address().port}`;
   const models = path.join(root, "models.json"), auth = path.join(root, "auth.json");
   await writeFile(models, JSON.stringify({ models: Object.fromEntries(served.map(([provider, id]) => [id,
-    { provider, id, name: id, api: "openai-responses", baseUrl: base, contextWindow: 100_000, reasoning: false }])) }));
+    { provider, id, name: id, api: "openai-responses", baseUrl: base, contextWindow: 100_000, reasoning: Boolean(settings) }])) }));
   await writeFile(auth, JSON.stringify(signedIn ? Object.fromEntries(served.map(([provider]) => [provider, { type: "api_key", key: "t" }])) : {}), { mode: 0o600 });
   const previous = { PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, PI_HARNESS_CORE_ARGS: process.env.PI_HARNESS_CORE_ARGS };
   process.env.PI_CODING_AGENT_DIR = agentDir;
   process.env.PI_HARNESS_CORE_ARGS = JSON.stringify(["--models", models, "--auth", auth, "--catalog", path.join(root, "catalog"), "--agent-dir", agentDir]);
-  const h = { root, cwd, bodies: provider.bodies };
+  const h = { root, cwd, agentDir, bodies: provider.bodies };
   t.after(async () => {
     await h.client?.stop(); await h.supervisor?.stop();
     provider.server.closeAllConnections(); await new Promise((resolve) => provider.server.close(resolve));
@@ -200,10 +200,15 @@ test("a session that names no model starts on the settings' default model and th
   await send(h, id, "hello");
   assert.deepEqual(await replyTexts(h, id), ["DEFAULT_REPLY"]);
   assert.equal(h.bodies[0].model, "other");
-  // The choice is kept: after the worker stops, the session continues on the same model.
+  const thinking = async () => (await h.client.request("get_actor_state", { sessionId: id })).state.thinkingLevel;
+  assert.equal(await thinking(), "high", "the default thinking level comes with the default model");
+  // Both are kept together: after the worker stops, the session continues on the same
+  // model and thinking level, and the settings are not applied again.
   await h.client.request("stop_session", { sessionId: id });
+  await writeFile(path.join(h.agentDir, "settings.json"), JSON.stringify({ defaultProvider: "test", defaultModel: "m", defaultThinkingLevel: "low" }));
   await send(h, id, "again");
   assert.equal(h.bodies[1].model, "other");
+  assert.equal(await thinking(), "high");
 });
 
 test("Python, a forked child, a family message and a cron run, on the core", { skip: !runtimeReady && "kernel runtime not available", timeout: 300_000 }, async (t) => {
