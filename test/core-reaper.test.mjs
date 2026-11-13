@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { CoreReaper, coreReap, REAP_AGE_SECONDS } from "../src/core-reaper.mjs";
+import { CoreReaper, coreReap, REAP_AGE_SECONDS, REAP_PROTOCOL } from "../src/core-reaper.mjs";
 import { RECOVERY_DETAIL_FIELDS } from "../src/python-recovery.mjs";
 
 async function folder(t) {
@@ -55,6 +55,22 @@ test("passes repeat at the interval after the first delay and stop waits for a r
   const after = passes;
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(passes, after, "no pass after stop");
+});
+
+test("an older core that does not know the cleanup protocol is never asked to delete", async (t) => {
+  const dir = await folder(t), session = path.join(dir, "s");
+  await mkdir(path.join(session, "log"), { recursive: true });
+  await writeFile(path.join(session, "log/000001.payload.jsonl"), "{}\n");
+  // Stand-ins: an old core that refuses unknown flags, and one that records what it gets.
+  const old = path.join(dir, "old-core"), recording = path.join(dir, "new-core"), seen = path.join(dir, "seen");
+  await writeFile(old, `#!/bin/sh\nfor a in "$@"; do [ "$a" = --protocol ] && { echo "usage" >&2; exit 2; }; done\nrm -f "$2"/log/*.payload.jsonl; echo '{"deleted":[],"bytes":0}'\n`, { mode: 0o755 });
+  await writeFile(recording, `#!/bin/sh\necho "$@" > "${seen}"\necho '{"deleted":[],"bytes":0}'\n`, { mode: 0o755 });
+  await assert.rejects(coreReap(session, REAP_AGE_SECONDS, { env: { ...process.env, PI_HARNESS_CORE_BIN: old } }));
+  assert.ok(existsSync(path.join(session, "log/000001.payload.jsonl")), "nothing deleted");
+  await coreReap(session, REAP_AGE_SECONDS, { env: { ...process.env, PI_HARNESS_CORE_BIN: recording } });
+  const args = (await readFile(seen, "utf8")).trim().split(" ");
+  assert.deepEqual(args.slice(-2), ["--protocol", REAP_PROTOCOL]);
+  assert.equal(REAP_PROTOCOL, "2");
 });
 
 const coreReady = Boolean(process.env.PI_HARNESS_CORE_BIN);

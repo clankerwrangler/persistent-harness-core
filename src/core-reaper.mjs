@@ -13,12 +13,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const FIRST_RUN_DELAY_MS = 10 * 60 * 1000;
 const REAP_TIMEOUT_MS = 10 * 60 * 1000;
 
-/** `core reap <dir> <age> --keep-details <fields>`: resolves to `{ deleted: [files], bytes }`;
- * rejects on failure. The named detail fields of old tool results are kept. */
+// The cleanup behaviour this harness relies on (every tool call's arguments kept, only
+// provably old chunks): cores before it reject the flag before deleting anything, so an
+// older core can never run this cleanup with weaker rules.
+export const REAP_PROTOCOL = "2";
+
+/** `core reap <dir> <age> --keep-details <fields> --protocol 2`: resolves to
+ * `{ deleted: [files], bytes }`; rejects on failure. The named detail fields of old tool
+ * results are kept. */
 export function coreReap(dir, ageSeconds, { keepDetails = RECOVERY_DETAIL_FIELDS, env = process.env } = {}) {
   const keep = keepDetails.length ? ["--keep-details", keepDetails.join(",")] : [];
   return new Promise((resolve, reject) => {
-    execFile(coreBinary(env), ["reap", dir, String(ageSeconds), ...keep], { env, timeout: REAP_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
+    execFile(coreBinary(env), ["reap", dir, String(ageSeconds), ...keep, "--protocol", REAP_PROTOCOL],
+      { env, timeout: REAP_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
       (error, stdout) => {
         if (error) return reject(error);
         try {
