@@ -3,7 +3,7 @@
 \*   src/core-transcript-reader.mjs sha256:4b2487304c758a1ac8b3a2026aa3430d95a6de56274b724272ae37316be68fa4
 \*   src/conversation-projection.mjs sha256:9cff939b4541fb403dd7af8947017d7c013c24e444c1a04c11b40ab9af86e503
 \*   src/input-images.mjs sha256:6325106ac1c28778a2f1ec2db7efbd13b72718990634894eb8e03ea2ba429076
-\*   src/supervisor.mjs sha256:8873880511b6679f9a6b6d0d3d3657c72b54e1512f7f853bbaf7f09b24b49eb9
+\*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
 EXTENDS Naturals, Sequences
 CONSTANT Bug
 \* Request-time image authorization. Each request rereads the entry from the core's

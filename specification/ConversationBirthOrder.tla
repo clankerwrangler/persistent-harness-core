@@ -2,7 +2,7 @@
 \* Sources:
 \*   src/conversation-projection.mjs sha256:9cff939b4541fb403dd7af8947017d7c013c24e444c1a04c11b40ab9af86e503
 \*   src/progress-projection.mjs sha256:221c8cbc55664dc7596e4f9c1538c00e2ce3b7a804a289466f89676854767d43
-\*   src/supervisor.mjs sha256:8873880511b6679f9a6b6d0d3d3657c72b54e1512f7f853bbaf7f09b24b49eb9
+\*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
 
 \* Reply text and progress headings are shown in the order they began, live and after a
 \* reload. A reply's request starts first; reasoning shown meanwhile is recorded as

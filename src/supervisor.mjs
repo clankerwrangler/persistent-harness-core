@@ -19,6 +19,7 @@ import { LiveConversation } from "./live-conversation.mjs";
 import { pendingFamilyMessage, projectAgentMessageHistoryMessage } from "./agent-message-projection.mjs";
 import { assistantTextPart, sortVisibleHistory, pendingInputMessage } from "./conversation-projection.mjs";
 import { BackgroundCompletionMonitor, defaultBackgroundJobsDirectory } from "./background-notifier.mjs";
+import { CoreReaper } from "./core-reaper.mjs";
 import { normalizeCronLaunch } from "./cron-launch.mjs";
 import { DEFAULT_CRON_TIMEZONE } from "./cron-schedule.mjs";
 import { rootReminders } from "./run-reminders.mjs";
@@ -445,6 +446,7 @@ export class HarnessSupervisor {
   #inboxStore;
   #inboxServer;
   #backgroundCompletionMonitor;
+  #coreReaper;
   get backgroundScans() { return this.#backgroundCompletionMonitor?.completedScans ?? 0; }
   #autoTitleInflight = new Map();
   #notifications;
@@ -498,7 +500,10 @@ export class HarnessSupervisor {
     coreSessionsPath = coreSessionsDirectory(),
     // Creating, reading and removing core sessions (replaceable in tests).
     coreSessions = { create: createCoreSession, context: coreSessionContext, remove: removeCoreSession },
+    // The daily cleanup of old stored tool output and reasoning; null turns it off.
+    coreReaperFactory = (options) => new CoreReaper(options),
   }) {
+    this.coreReaperFactory = coreReaperFactory;
     this.coreSessionsDirectory = path.resolve(coreSessionsPath);
     this.coreSessions = coreSessions;
     Object.assign(this, { socketPath, databasePath, pidPath, maxFrameBytes, messageRateCapacity, messageRateRefillPerSecond,
@@ -613,6 +618,9 @@ export class HarnessSupervisor {
         logger: this.logger,
       });
       this.#backgroundCompletionMonitor.start();
+      this.#coreReaper = this.coreReaperFactory?.({ sessionsDirectory: this.coreSessionsDirectory, logger: this.logger,
+        onRun: (summary) => this.#log("core_cleanup", summary) });
+      this.#coreReaper?.start();
       this.#notificationTimer = setInterval(() => {
         try {
           this.#nudgeHomeIfDue();
@@ -629,6 +637,7 @@ export class HarnessSupervisor {
       if (this.#ownedSocketPath) try { await unlink(this.#ownedSocketPath); } catch {}
       this.#closeSessionHistoryIndex();
       await this.#backgroundCompletionMonitor?.stop().catch(() => {}); this.#backgroundCompletionMonitor = undefined;
+      await this.#coreReaper?.stop().catch(() => {}); this.#coreReaper = undefined;
       await this.#cronScheduler?.stop().catch(() => {}); this.#cronScheduler = undefined;
       this.#inboxServer?.close(); this.#inboxServer = undefined; this.#inboxStore?.close(); this.#inboxStore = undefined;
       clearInterval(this.#notificationTimer); this.#notifications?.close(); this.#notifications = undefined;
@@ -3161,6 +3170,7 @@ export class HarnessSupervisor {
       clearInterval(this.#notificationTimer);
       for (const timer of this.#passivationTimers.values()) clearTimeout(timer); this.#passivationTimers.clear(); this.#startQueue = [];
       await this.#backgroundCompletionMonitor?.stop(); this.#backgroundCompletionMonitor = undefined;
+      await this.#coreReaper?.stop(); this.#coreReaper = undefined;
       await this.#cronScheduler?.stop(); this.#cronScheduler = undefined;
       if (this.#inboxServer) { this.#inboxServer.closeAllConnections?.(); await new Promise((resolve) => this.#inboxServer.close(resolve)); } this.#inboxServer = undefined;
       await Promise.all([...this.#actors.keys()].map((id) => this.#stopActor(id, "passivated"))); await Promise.all([...this.#launchPromises.values()]);

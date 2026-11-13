@@ -1,7 +1,7 @@
 ------------------------- MODULE ActorCompileCache -------------------------
 \* Sources:
 \*   src/actor-compile-cache.mjs sha256:f0308df107c22995268707e4f94b1456d3c3757379c0deb5b75b7bcee7920c94
-\*   src/supervisor.mjs sha256:8873880511b6679f9a6b6d0d3d3657c72b54e1512f7f853bbaf7f09b24b49eb9
+\*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
 \*   bin/core-actor.mjs sha256:c7b601d33fa058e7d8fa3dce7d2131f561ac2aed0cff6234e029207bb7281cda
 
 EXTENDS Naturals, FiniteSets
