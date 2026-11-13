@@ -1008,7 +1008,7 @@ export class HarnessStore {
       || this.isSessionDeleting(row.id) || this.hasPendingSessionWork(row.id)) return;
     const identity = /^[a-zA-Z0-9-]{1,128}$/.test(row.id) ? row.id : "[invalid session ID]";
     const id = `root-idle:${createHash("sha256").update(row.id).update("\0").update(String(generation)).update("\0").update(String(now)).digest("hex")}`;
-    const body = `Harness lifecycle report (supervisor-generated, not session-authored): root session ${identity} finished its turn and is now idle, with nothing left to do. It does not continue until it gets a new message.`;
+    const body = `Harness lifecycle report (supervisor-generated, not session-authored): root session ${identity} finished its turn and is now idle.`;
     this.#db.prepare(`INSERT OR IGNORE INTO messages
       (id, sender_id, target_id, relationship, delivery_mode, body, state, attempt_count, accepted_at, queued_at, child_exit_generation)
       VALUES (?, ?, ?, 'sibling', 'auto', ?, 'queued', 0, ?, ?, ?)`)

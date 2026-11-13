@@ -1,7 +1,7 @@
 -------------------------- MODULE RootScratch --------------------------
 \* Sources:
 \*   src/session-scratch.mjs sha256:a2a94a3dfd9c3e476cd845ac9cab3b3026a8d5c6e42ebe935a0f28218495cfe9
-\*   src/store.mjs sha256:d98357b843f4e0e5317f3bb219dd4692078eb55ecb29f02a27a974c21e844bcf
+\*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
 \*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
 \*   src/process-ownership.mjs sha256:efa41d00c5b4c1bf61ca2eeff513d9c97b2ca9b794a376a32ed12a41f6d4b9d8
 \*   src/background-notifier.mjs sha256:5a196d023ebf583d7ff892c3d2ea6e648cacb21f61dff1fb5a9e103c216cc4d7

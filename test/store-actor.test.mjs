@@ -846,7 +846,7 @@ test("resident abnormal turns share durable lifecycle receipts without replaying
   store.deleteSession("parent"); store.deleteSession("home"); assert.equal(store.listPendingChildExitMessages().length, 0);
 });
 
-test("Home hears when another root ends a turn with nothing left to do", async (t) => {
+test("Home hears when another root ends a turn and goes idle", async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "harness-root-idle-"));
   const store = new HarnessStore(path.join(dir, "store.sqlite"));
   t.after(async () => { store.close(); await rm(dir, { recursive: true, force: true }); });
@@ -866,7 +866,8 @@ test("Home hears when another root ends a turn with nothing left to do", async (
   store.setActorActivity("room-a", 1, true, 5); store.setActorActivity("room-a", 1, false, 6);
   assert.equal(reports().length, 1);
   assert.equal(reports()[0].senderId, "room-a");
-  assert.match(reports()[0].body, /supervisor-generated, not session-authored\): root session room-a finished its turn and is now idle/);
+  // It states only what is known: the root is idle. Whether work remains is not the harness's to say.
+  assert.equal(reports()[0].body, "Harness lifecycle report (supervisor-generated, not session-authored): root session room-a finished its turn and is now idle.");
   assert.doesNotMatch(reports()[0].body, /Room A/, "no display names, as in every lifecycle report");
   store.setActorActivity("room-a", 1, false, 7);
   assert.equal(reports().length, 1, "staying idle is not a new report");

@@ -2,7 +2,7 @@
 \* Sources:
 \*   src/core-worker.mjs sha256:9d4cc1e0957a339276306c7aaffe806593ca2315ad0bb65c7b57731160433bfe
 \*   src/child-turn-failure.mjs sha256:3e70906dd488214003d4693ea887b959357b5fb2b7ee18074e6b90f5fc381fc9
-\*   src/store.mjs sha256:d98357b843f4e0e5317f3bb219dd4692078eb55ecb29f02a27a974c21e844bcf
+\*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
 
 \* A session's failed turn is saved in its history first (the journal), then reported
 \* to the supervisor until a receipt comes back; an ordered witness records how far

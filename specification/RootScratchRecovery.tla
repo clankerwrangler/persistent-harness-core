@@ -1,7 +1,7 @@
 ---------------------- MODULE RootScratchRecovery ----------------------
 \* Sources:
 \*   src/session-scratch.mjs sha256:a2a94a3dfd9c3e476cd845ac9cab3b3026a8d5c6e42ebe935a0f28218495cfe9
-\*   src/store.mjs sha256:d98357b843f4e0e5317f3bb219dd4692078eb55ecb29f02a27a974c21e844bcf
+\*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
 EXTENDS TLC
 CONSTANT Fault
 VARIABLES phase, leaf, baseStable, available, ownership, created, witness,
