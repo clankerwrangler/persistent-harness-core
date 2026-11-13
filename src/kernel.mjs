@@ -1,0 +1,800 @@
+import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { access, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { constants } from "node:fs";
+import { JsonLineDecoder, encodeFrame } from "./framing.mjs";
+import { historyMemoryDiagnostics } from "./memory-diagnostics.mjs";
+import { PythonRuntimeRejection } from "./python-runtime-errors.mjs";
+import { preferAsOomVictim } from "./oom-victim.mjs";
+
+const KERNEL_FRAME_BYTES = 1024 * 1024;
+
+async function classifySpawnFailure(error, pythonPath, cwd) {
+  // A missing PID also covers host configuration and capacity errors. Repair
+  // only an explicitly located interpreter whose failure can be established.
+  if (!["ENOENT", "ENOTDIR", "EACCES", "ENOEXEC"].includes(error.code)
+    || !path.isAbsolute(pythonPath)) return error;
+  try {
+    if (cwd != null) {
+      if (!(await stat(cwd)).isDirectory()) return error;
+      await access(cwd, constants.X_OK);
+    }
+  } catch { return error; }
+  try {
+    if (!(await stat(pythonPath)).isFile()) return new PythonRuntimeRejection(error.message, { cause: error });
+    await access(pythonPath, constants.X_OK);
+  } catch (cause) {
+    if (["ENOENT", "ENOTDIR", "EACCES"].includes(cause.code)) {
+      return new PythonRuntimeRejection(error.message, { cause: error });
+    }
+    return error;
+  }
+  return error.code === "ENOEXEC" ? new PythonRuntimeRejection(error.message, { cause: error }) : error;
+}
+
+class OutputCollector {
+  constructor({ maxBytes, onUpdate }) {
+    this.maxBytes = maxBytes;
+    this.onUpdate = onUpdate;
+    this.stdout = "";
+    this.stderr = "";
+    this.stdoutBytes = 0;
+    this.stderrBytes = 0;
+    this.totalBytes = 0;
+    this.stdoutTruncated = false;
+    this.stderrTruncated = false;
+    this.outputs = [];
+    this.mime = null;
+    this.richOutputBytes = 0;
+    this.richOutputLimit = KERNEL_FRAME_BYTES;
+    this.richTruncated = false;
+  }
+
+  addText(text) {
+    if (!text) return;
+    const last = this.outputs.at(-1);
+    if (last && typeof last.text === "string") this.outputs[this.outputs.length - 1] = { text: last.text + text };
+    else this.outputs.push({ text });
+  }
+
+  add(stream, chunk) {
+    const text = chunk.toString("utf8");
+    const bytes = Buffer.from(text);
+    this.totalBytes += bytes.length;
+    const key = stream === "stderr" ? "stderr" : "stdout";
+    let captured = "";
+    if (!this[`${key}Truncated`]) {
+      const remaining = this.maxBytes - this[`${key}Bytes`];
+      let end = Math.min(bytes.length, remaining);
+      while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
+      const retained = bytes.subarray(0, end);
+      captured = retained.toString("utf8");
+      this[`${key}Bytes`] += retained.length;
+      this[key] += captured;
+      this.addText(captured);
+      if (bytes.length > remaining) {
+        this[`${key}Truncated`] = true;
+        const marker = `\n[... output truncated at ${this.maxBytes} bytes ...]`;
+        this.addText(marker); captured += marker;
+      }
+    }
+    if (captured) this.onUpdate?.({ stream: key, text: captured, ...this.streamResult() });
+  }
+
+  truncateRich(index = this.outputs.length) {
+    if (this.richTruncated) return;
+    this.richTruncated = true;
+    const text = `\n[... rich output truncated at ${this.richOutputLimit} bytes ...]`;
+    if (index === this.outputs.length) this.addText(text);
+    else this.outputs.splice(index, 0, { text });
+  }
+
+  addMime(mime, truncated = false, terminal = false) {
+    if (truncated) { this.truncateRich(); return; }
+    if (!mime || typeof mime !== "object" || Array.isArray(mime) || Object.keys(mime).length === 0) return;
+    const record = { mime };
+    const bytes = Buffer.byteLength(JSON.stringify(record));
+    // The decoder already accepted this whole frame. JSON number expansion
+    // must not revoke a previously legal single rich result.
+    if (terminal) {
+      this.richOutputLimit = Math.max(KERNEL_FRAME_BYTES, bytes);
+      if (this.richOutputBytes + bytes > this.richOutputLimit) {
+        // Explicit displays must not consume a formerly legal final result's
+        // capacity. Reclaim the oldest MIME, preserving all surviving order.
+        const retained = [];
+        let firstRemoved;
+        for (const previous of this.outputs) {
+          if (previous.mime && this.richOutputBytes + bytes > this.richOutputLimit) {
+            this.richOutputBytes -= Buffer.byteLength(JSON.stringify(previous));
+            firstRemoved ??= retained.length;
+          } else retained.push(previous);
+        }
+        this.outputs = retained;
+        if (firstRemoved !== undefined) this.truncateRich(firstRemoved);
+      }
+    } else if (this.richOutputBytes === 0) this.richOutputLimit = Math.max(KERNEL_FRAME_BYTES, bytes);
+    if (this.richOutputBytes + bytes > this.richOutputLimit) { this.truncateRich(); return; }
+    this.richOutputBytes += bytes;
+    this.mime = mime;
+    this.outputs.push(record);
+  }
+
+  streamResult() {
+    const marker = `\n[... output truncated at ${this.maxBytes} bytes ...]`;
+    return {
+      stdout: this.stdoutTruncated ? `${this.stdout}${marker}` : this.stdout,
+      stderr: this.stderrTruncated ? `${this.stderr}${marker}` : this.stderr,
+      truncated: this.stdoutTruncated || this.stderrTruncated || this.richTruncated,
+      totalBytes: this.totalBytes,
+    };
+  }
+
+  result() {
+    return {
+      ...this.streamResult(),
+      mime: this.mime,
+      outputs: [...this.outputs],
+      richOutputBytes: this.richOutputBytes,
+      richOutputLimit: this.richOutputLimit,
+    };
+  }
+
+  close() {}
+}
+
+export class PythonKernel {
+  #process;
+  #control;
+  #decoder;
+  #readyPromise;
+  #resolveReady;
+  #rejectReady;
+  #pending = new Map();
+  #tail = Promise.resolve();
+  #active;
+  #snapshotTimer;
+  #coldTimer;
+  #coldSupported = false;
+  #coldEpoch = 0;
+  #coldPass;
+  #coldDueAt = 0;
+  #coldPauseUntil = 0;
+  #coldStats = { state: "none" };
+
+  #interruptTimer;
+  #generation = 0;
+  #failureEpoch = 0;
+  #snapshotGeneration = 0;
+  #lastSnapshot;
+  #checkpointError;
+  #controlError;
+  #closed = false;
+  #ready = false;
+  #queuedOperations = 0;
+  #onRuntimeValidated;
+  #runtimeValidated = false;
+  #runtimeVersions;
+  #runtimeValidationPromise;
+
+  constructor({
+    pythonPath,
+    expectedVersions,
+    kernelScript,
+    runtimeSupportDir,
+    cwd,
+    stateDir,
+    manifest,
+    hostHandlers,
+    scratch = null,
+    maxOutputBytes = 64 * 1024,
+    shutdownTimeoutMs = 1500,
+    killTimeoutMs = 1000,
+    interruptTimeoutMs = 2000,
+  }) {
+    this.pythonPath = pythonPath;
+    this.expectedVersions = expectedVersions;
+    this.kernelScript = kernelScript;
+    this.runtimeSupportDir = runtimeSupportDir;
+    this.cwd = cwd;
+    this.stateDir = stateDir;
+    this.manifest = manifest;
+    this.hostHandlers = hostHandlers;
+    this.scratch = scratch;
+    this.maxOutputBytes = maxOutputBytes;
+    this.shutdownTimeoutMs = shutdownTimeoutMs;
+    this.killTimeoutMs = killTimeoutMs;
+    this.interruptTimeoutMs = interruptTimeoutMs;
+    this.snapshotPath = stateDir;
+    this.configPath = path.join(stateDir, "kernel-config.json");
+  }
+
+  get isRunning() {
+    return Boolean(this.#process && this.#process.exitCode === null);
+  }
+
+  get isBusy() {
+    return Boolean(this.#active);
+  }
+
+  get snapshotStats() {
+    return {
+      generation: this.#generation,
+      snapshotGeneration: this.#snapshotGeneration,
+      dirty: this.#generation > this.#snapshotGeneration,
+      last: this.#lastSnapshot?.stats ?? null,
+      ...(this.#checkpointError ? { checkpointError: this.#checkpointError } : {}),
+    };
+  }
+
+  start({ onRuntimeValidated = async () => {} } = {}) {
+    if (this.#readyPromise) return this.#readyPromise;
+    if (this.#closed) return Promise.reject(new Error("kernel is closed"));
+    const starting = this.#startOnce(onRuntimeValidated);
+    starting.then(() => this.#armColdMemory(), () => {});
+    this.#readyPromise = starting;
+    starting.catch(() => {
+      if (this.#readyPromise === starting && !this.#process) this.#readyPromise = undefined;
+    });
+    return starting;
+  }
+
+  async #startOnce(onRuntimeValidated) {
+    this.#coldSupported = false;
+    this.#coldStats = { state: "none" };
+    this.#runtimeValidated = false;
+    this.#runtimeValidationPromise = undefined;
+    this.#runtimeVersions = undefined;
+    this.#onRuntimeValidated = onRuntimeValidated;
+    if (this.cwd != null) {
+      if (!(await stat(this.cwd)).isDirectory()) throw new Error("kernel cwd is not a directory");
+      await access(this.cwd, constants.X_OK);
+    }
+    await mkdir(this.stateDir, { recursive: true, mode: 0o700 });
+    await writeFile(this.configPath, `${JSON.stringify({
+      version: 1,
+      manifest: this.manifest,
+      scratch: this.scratch,
+      snapshotPath: this.snapshotPath,
+      maxOutputFrameBytes: KERNEL_FRAME_BYTES,
+      expectedVersions: this.expectedVersions,
+    }, null, 2)}\n`, { mode: 0o600 });
+    const pythonPaths = [
+      this.runtimeSupportDir,
+      ...this.manifest.skills.flatMap((skill) => skill.python ? [skill.python.srcPath] : []),
+    ];
+    const readyPromise = new Promise((resolve, reject) => {
+      this.#resolveReady = resolve;
+      this.#rejectReady = reject;
+    });
+    const child = spawn(this.pythonPath, [this.kernelScript, "--config", this.configPath], {
+      cwd: this.cwd,
+      env: {
+        ...process.env,
+        ...(this.scratch ? { PI_HARNESS_ROOT_SESSION_ID: this.scratch.rootSessionId,
+          PI_HARNESS_SCRATCH_DIRECTORY: this.scratch.directory } : {}),
+        PYTHONDONTWRITEBYTECODE: "1",
+        PYTHONUNBUFFERED: "1",
+        PYTHONPATH: [...pythonPaths, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+      },
+      stdio: ["ignore", "pipe", "pipe", "pipe"],
+    });
+    preferAsOomVictim(child.pid);
+    this.#process = child;
+    this.#control = child.stdio[3];
+    this.#decoder = new JsonLineDecoder({ maxFrameBytes: KERNEL_FRAME_BYTES });
+    child.stdout.on("data", (chunk) => { if (this.#process === child) this.#active?.collector.add("stdout", chunk); });
+    child.stderr.on("data", (chunk) => { if (this.#process === child) this.#active?.collector.add("stderr", chunk); });
+    child.stdout.on("error", () => {});
+    child.stderr.on("error", () => {});
+    this.#control.on("error", (error) => { if (this.#process === child) this.#terminateOnControlError(error); });
+    this.#control.on("data", (chunk) => { if (this.#process === child) this.#onControl(chunk); });
+    child.once("error", async (error) => {
+      if (this.#process !== child) return;
+      if (!child.pid) {
+        const failure = await classifySpawnFailure(error, this.pythonPath, this.cwd);
+        if (this.#process !== child) return;
+        this.#process = undefined;
+        this.#control = undefined;
+        this.#failAll(failure);
+      } else this.#terminateOnControlError(error);
+    });
+    child.once("exit", (code, signal) => {
+      if (this.#process !== child) return;
+      const error = this.#controlError ?? new Error(`Python kernel exited code=${code} signal=${signal}`);
+      this.#controlError = undefined;
+      this.#failAll(error);
+      this.#process = undefined;
+      this.#control = undefined;
+      if (this.#ready) this.#readyPromise = undefined;
+      this.#ready = false;
+    });
+    return readyPromise.catch(async (error) => {
+      // Completion publication must settle even if the child exits during it.
+      await this.#runtimeValidationPromise?.catch(() => {});
+      throw error;
+    });
+  }
+
+  #onControl(chunk) {
+    let frames;
+    try {
+      frames = this.#decoder.push(chunk);
+    } catch (error) {
+      this.#terminateOnControlError(error);
+      return;
+    }
+    for (const frame of frames) {
+      if (frame.type === "startup_error") {
+        const error = frame.phase === "runtime"
+          ? new PythonRuntimeRejection(frame.error ?? "Python runtime rejected")
+          : new Error(frame.error ?? "Python startup failed");
+        this.#terminateOnControlError(error);
+        return;
+      }
+      if (frame.type === "runtime_validated") {
+        if (this.#runtimeVersions) {
+          this.#terminateOnControlError(new Error("duplicate Python runtime validation"));
+          return;
+        }
+        const versions = frame.versions;
+        if (!["python", "ipython", "dill"].every((key) => typeof versions?.[key] === "string" && versions[key])) {
+          this.#terminateOnControlError(new Error("invalid Python runtime versions"));
+          return;
+        }
+        this.#runtimeVersions = versions;
+        const child = this.#process;
+        this.#runtimeValidationPromise = Promise.resolve().then(async () => {
+          if (this.expectedVersions && Object.entries(this.expectedVersions).some(([key, value]) => versions[key] !== value)) {
+            throw new PythonRuntimeRejection(`managed runtime version mismatch: ${JSON.stringify(versions)}`);
+          }
+          const onValidated = this.#onRuntimeValidated;
+          this.#onRuntimeValidated = undefined;
+          await onValidated(versions);
+          if (this.#process !== child || this.#controlError) return;
+          this.#runtimeValidated = true;
+          this.#writeControl({ type: "runtime_continue" });
+        }).catch((error) => { if (this.#process === child) this.#terminateOnControlError(error); });
+        continue;
+      }
+      if (frame.type === "ready") {
+        if (!this.#runtimeValidated) {
+          this.#terminateOnControlError(new Error("Python ready before runtime validation"));
+          return;
+        }
+        this.#coldSupported = frame.coldResidencyVersion === 1;
+        this.#coldStats = this.#coldSupported ? { version: 1, state: "none" } : { state: "unsupported" };
+        this.#coldDueAt = Date.now() + 30_000;
+        this.#ready = true;
+        this.#resolveReady?.({ ...frame, versions: this.#runtimeVersions });
+        continue;
+      }
+      if (frame.type === "host_request") {
+        this.#handleHostRequest(frame);
+        continue;
+      }
+      const pending = this.#pending.get(frame.id);
+      if (!pending) continue;
+      if (frame.type === "result") {
+        if (this.#active?.id !== frame.id) continue;
+        if (["stdout", "stderr"].includes(frame.stream)) {
+          if (typeof frame.mime?.["text/plain"] === "string") this.#active.collector.add(frame.stream, frame.mime["text/plain"]);
+        } else this.#active.collector.addMime(frame.mime, frame.truncated === true,
+          frame.outputType === undefined);
+        continue;
+      }
+      if (["done", "snapshot_done", "shutdown_done", "memory_diagnostics_done", "cold_memory_done", "protocol_error"].includes(frame.type)) {
+        this.#pending.delete(frame.id);
+        if (frame.type === "done" && this.#active?.id === frame.id) {
+          // The execution no longer owns interruption during output draining.
+          this.#active.interruptPhase = undefined;
+          if (this.#interruptTimer) clearTimeout(this.#interruptTimer);
+          this.#interruptTimer = undefined;
+        }
+        if ((frame.type === "snapshot_done" && frame.ok === false) || frame.type === "protocol_error") {
+          pending.reject(new Error(frame.error ?? "kernel command failed"));
+        } else {
+          pending.resolve(frame);
+        }
+      }
+    }
+  }
+
+  async #handleHostRequest(frame) {
+    const active = this.#active;
+    const control = this.#control;
+    const allowed = this.manifest.skills.some((skill) => skill.python?.hostRequests?.includes(frame.requestType));
+    const handler = allowed ? this.hostHandlers[frame.requestType] : undefined;
+    if (!active || !handler) {
+      this.#writeControl({
+        type: "host_response",
+        id: frame.id,
+        ok: false,
+        error: allowed ? `no host handler for ${frame.requestType}` : `host request is not granted: ${frame.requestType}`,
+      });
+      return;
+    }
+    // The original cell owns every callback. A cancelled host operation can
+    // complete after a later cell starts, or after the process is replaced.
+    const reply = (response) => {
+      if (this.#active !== active || this.#control !== control || control?.destroyed
+        || active.abortController.signal.aborted) return;
+      this.#writeControl(response);
+    };
+    try {
+      const result = await handler(frame.payload, {
+        signal: active.abortController.signal,
+        toolContext: active.toolContext,
+        onProgress: (stream, text) => reply({ type: "host_progress", id: frame.id, stream, text }),
+      });
+      reply({ type: "host_response", id: frame.id, ok: true, result });
+    } catch (error) {
+      reply({
+        type: "host_response",
+        id: frame.id,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  #writeControl(frame) {
+    if (!this.#control || this.#control.destroyed) throw new Error("kernel control channel is closed");
+    this.#control.write(encodeFrame(frame, { maxFrameBytes: KERNEL_FRAME_BYTES }));
+  }
+
+  #command(type, fields = {}) {
+    const id = randomUUID();
+    return new Promise((resolve, reject) => {
+      this.#pending.set(id, { resolve, reject });
+      try {
+        this.#writeControl({ type, id, ...fields });
+      } catch (error) {
+        this.#pending.delete(id);
+        reject(error);
+      }
+    });
+  }
+
+  execute(code, { signal, onUpdate, toolContext, namespaceCheckpoint, checkpointInBackground = false, onCheckpoint } = {}) {
+    this.#cancelColdMemory();
+    const deferred = checkpointInBackground && namespaceCheckpoint ? Promise.withResolvers() : null;
+    const failureEpoch = this.#failureEpoch;
+    const notAdmitted = () => {
+      const cancelled = signal?.aborted;
+      if (!cancelled && failureEpoch === this.#failureEpoch) return null;
+      return { ok: false, code, durationMs: 0, mime: null, outputs: [],
+        errorType: cancelled ? "AbortError" : "KernelReplacedError",
+        error: cancelled ? "Python execution cancelled before admission."
+          : "Python kernel failed while this cell was queued. The cell did not run; prior execution outcome may be unknown.",
+        stdout: "", stderr: "", truncated: false, totalBytes: 0 };
+    };
+    this.#queuedOperations += 1;
+    const operation = this.#tail.then(async () => {
+      const queuedFailure = notAdmitted();
+      if (queuedFailure) return queuedFailure;
+      await this.start();
+      // Startup can yield while the caller cancels. Never write a pre-aborted
+      // cell to the execution channel, even when its FIFO predecessor succeeded.
+      const startupFailure = notAdmitted();
+      if (startupFailure) return startupFailure;
+      const id = randomUUID();
+      const checkpoint = namespaceCheckpoint ? { ...namespaceCheckpoint, executionId: id } : undefined;
+      const collector = new OutputCollector({ maxBytes: this.maxOutputBytes, onUpdate });
+      const abortController = new AbortController();
+      const active = { id, collector, abortController, toolContext, interruptPhase: "execution" };
+      let drainAborted = false;
+      const abort = () => {
+        if (this.#active === active && active.interruptPhase === undefined) drainAborted = true;
+        this.interrupt();
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      this.#active = active;
+      const startedAt = Date.now();
+      try {
+        const pending = new Promise((resolve, reject) => {
+          this.#pending.set(id, { resolve, reject });
+        });
+        this.#writeControl({ type: "execute", id, code, ...(checkpoint ? { namespaceCheckpoint: checkpoint } : {}) });
+        // A command can mutate the namespace before failing or being interrupted.
+        // Advance the generation once it has been admitted by the kernel channel.
+        this.#generation += 1;
+        const frame = await pending;
+        await new Promise((resolve) => setImmediate(resolve));
+        const output = collector.result();
+        const executionDurationMs = Date.now() - startedAt;
+        const result = {
+          ok: frame.ok !== false,
+          executionId: id,
+          ...(checkpoint ? { namespaceCheckpointAttempt: checkpoint } : {}),
+          code,
+          durationMs: executionDurationMs,
+          executionDurationMs,
+          checkpointDurationMs: 0,
+          errorType: frame.errorType ?? null,
+          error: frame.error ?? null,
+          ...output,
+        };
+        if (checkpoint) {
+          // Keep namespace publication inside this cell's FIFO slot. Pi owns
+          // canonical result persistence after this real promise resolves.
+          if (deferred) {
+            // The tool result ends the caller's cancellation scope. The existing
+            // FIFO still owns durability, including after the Agent settles.
+            signal?.removeEventListener("abort", abort);
+            abortController.abort();
+            collector.close();
+            deferred.resolve(structuredClone({ ...result,
+              namespaceCheckpointState: "pending", checkpointDurationMs: null,
+            }));
+          }
+          const checkpointStartedAt = Date.now();
+          try {
+            if (!deferred) {
+              if (drainAborted) throw new Error("namespace checkpoint cancelled before admission");
+              // A synchronous snapshot retains caller cancellation under a fresh
+              // phase; an abort already handled by execution does not cancel it.
+              active.interruptPhase = "checkpoint";
+            }
+            const snapshot = await this.#takeSnapshot();
+            if (Object.entries(checkpoint).some(([key, value]) => snapshot.namespaceCheckpoint?.[key] !== value)) {
+              throw new Error("snapshot identity does not match the originating execution");
+            }
+            result.namespaceCheckpoint = snapshot.namespaceCheckpoint;
+            result.namespaceSnapshotSkipped = snapshot.skipped;
+          } catch (error) {
+            result.executionOk = result.ok;
+            if (!result.ok) result.executionError = { errorType: result.errorType, error: result.error };
+            result.ok = false;
+            result.errorType = "NamespaceCheckpointError";
+            result.error = `Python execution ended, but its namespace checkpoint failed: ${error.message}. `
+              + "Side effects may have occurred. Do not replay this cell automatically.";
+          } finally {
+            result.checkpointDurationMs = Date.now() - checkpointStartedAt;
+          }
+          if (deferred) {
+            const outcome = Object.freeze({
+              ok: Boolean(result.namespaceCheckpoint),
+              namespaceCheckpointAttempt: Object.freeze({ ...checkpoint }),
+              ...(result.namespaceCheckpoint ? {
+                namespaceCheckpoint: Object.freeze({ ...result.namespaceCheckpoint }),
+                namespaceSnapshotSkipped: Object.freeze((result.namespaceSnapshotSkipped ?? [])
+                  .map((item) => Object.freeze({ ...item }))),
+              } : { error: result.error }),
+              executionDurationMs,
+              checkpointDurationMs: result.checkpointDurationMs,
+            });
+            this.#checkpointError = outcome.ok ? undefined : outcome;
+            try { await onCheckpoint?.(outcome); }
+            catch (error) {
+              this.#checkpointError = Object.freeze({ ...outcome, ok: false,
+                error: "Checkpoint completion notification failed: "
+                  + (error instanceof Error ? error.message : String(error)),
+              });
+            }
+          }
+        } else if (result.ok) this.#scheduleSnapshot();
+        result.durationMs = Date.now() - startedAt;
+        return result;
+      } catch (error) {
+        return {
+          ok: false,
+          executionId: id,
+          ...(checkpoint ? { namespaceCheckpointAttempt: checkpoint } : {}),
+          code,
+          durationMs: Date.now() - startedAt,
+          errorType: error?.name ?? "Error",
+          error: error instanceof Error ? error.message : String(error),
+          ...collector.result(),
+        };
+      } finally {
+        if (this.#interruptTimer) clearTimeout(this.#interruptTimer);
+        this.#interruptTimer = undefined;
+        signal?.removeEventListener("abort", abort);
+        abortController.abort();
+        collector.close();
+        this.#active = undefined;
+      }
+    });
+    const settled = operation.finally(() => { this.#queuedOperations -= 1; this.#armColdMemory(); });
+    this.#tail = settled.then(() => undefined, () => undefined);
+    if (!deferred) return operation;
+    operation.then(deferred.resolve, deferred.reject);
+    return deferred.promise;
+  }
+
+  interrupt() {
+    const active = this.#active;
+    const child = this.#process;
+    const phase = active?.interruptPhase;
+    if (!phase || !child) return false;
+    active.abortController.abort();
+    const signaled = child.kill("SIGINT");
+    if (signaled && !this.#interruptTimer) {
+      const timer = setTimeout(() => {
+        if (this.#interruptTimer !== timer) return;
+        this.#interruptTimer = undefined;
+        if (this.#active === active && this.#process === child
+          && active.interruptPhase === phase && child.exitCode === null) child.kill("SIGKILL");
+      }, this.interruptTimeoutMs);
+      this.#interruptTimer = timer;
+      timer.unref();
+    }
+    return signaled;
+  }
+
+  terminateForRecovery() {
+    if (!this.#process || this.#process.exitCode !== null) return false;
+    return this.#process.kill("SIGKILL");
+  }
+
+  get coldMemoryStats() { return { ...this.#coldStats }; }
+
+  #coldEligible() {
+    return this.#coldSupported && !this.#closed && this.#ready && this.isRunning && !this.#queuedOperations
+      && !this.#snapshotTimer
+      && !this.#pending.size && !this.#active;
+  }
+
+  #cancelColdMemory(discard = false) {
+    if (this.#coldTimer) clearTimeout(this.#coldTimer);
+    this.#coldTimer = undefined;
+    this.#coldEpoch++;
+    this.#coldPauseUntil = Date.now() + 100;
+    if (this.#coldPass) this.#coldStats = { ...this.#coldStats, state: discard ? "cancelled" : "deferred" };
+    // Only bounded mapping metadata survives ordinary cells, never namespace data.
+    if (discard) this.#coldPass = undefined;
+  }
+
+  #armColdMemory() {
+    if (!this.#coldEligible() || this.#coldTimer) return;
+    const epoch = this.#coldEpoch;
+    const due = this.#coldPass?.resumeAt ?? this.#coldDueAt;
+    this.#coldTimer = setTimeout(() => {
+      this.#coldTimer = undefined;
+      if (epoch !== this.#coldEpoch || !this.#coldEligible()) return;
+      const pass = this.#coldPass ?? { token: randomUUID(), phase: "mark", calls: 0, resumeAt: 0 };
+      this.#coldPass = pass;
+      void this.#coldStep(pass, epoch);
+    }, Math.max(0, due - Date.now(), this.#coldPauseUntil - Date.now()));
+    this.#coldTimer.unref();
+  }
+
+  async #coldStep(pass, epoch) {
+    if (this.#coldPass !== pass || epoch !== this.#coldEpoch || !this.#coldEligible()) return;
+    // Reserve the same control/FIFO owner synchronously before later cells queue.
+    this.#queuedOperations++;
+    pass.calls++;
+    const operation = this.#command("cold_memory", { token: pass.token, phase: pass.phase });
+    const settled = operation.finally(() => {
+      this.#queuedOperations--;
+      if (epoch !== this.#coldEpoch) this.#armColdMemory();
+    });
+    this.#tail = settled.then(() => undefined, () => undefined);
+    let result;
+    try { result = (await settled).result; }
+    catch { result = { state: "unavailable" }; }
+    if (this.#coldPass !== pass || epoch !== this.#coldEpoch) return;
+    const states = ["mark", "waiting", "pageout", "complete", "small", "hot", "no-swap", "no-pressure", "unsupported", "unreclaimable", "unavailable", "cancelled"];
+    const stats = { state: states.includes(result?.state) ? result.state : "unavailable" };
+    for (const key of ["markedBytes", "pageoutBytes", "durationNs", "rssBefore", "rssAfter", "swapBefore", "swapAfter", "adviceDurationNs", "maxAdviceDurationNs", "totalDurationNs", "maxStepDurationNs"])
+      if (Number.isSafeInteger(result?.[key]) && result[key] >= 0) stats[key] = result[key];
+    if (stats.state === "unsupported") this.#coldSupported = false;
+    this.#coldStats = { version: 1, ...stats, calls: pass.calls };
+    // A fixed maintenance cadence is not restarted by small ordinary cells.
+    if (!["mark", "waiting", "pageout"].includes(stats.state) || pass.calls >= 4096) {
+      this.#coldPass = undefined;
+      this.#coldDueAt = Date.now() + 30_000;
+    } else {
+      pass.resumeAt = Date.now() + (stats.state === "waiting" ? 1000 : 0);
+      if (stats.state === "waiting") pass.phase = "pageout";
+    }
+    this.#armColdMemory();
+  }
+
+  #scheduleSnapshot() {
+    if (this.#snapshotTimer) clearTimeout(this.#snapshotTimer);
+    this.#snapshotTimer = setTimeout(() => {
+      this.#snapshotTimer = undefined;
+      this.#enqueueSnapshot({ onlyIfDirty: true }).catch(() => {});
+    }, 500);
+    this.#snapshotTimer.unref();
+  }
+
+  async #takeSnapshot() {
+    const generation = this.#generation;
+    const frame = await this.#command("snapshot");
+    this.#snapshotGeneration = Math.max(this.#snapshotGeneration, generation);
+    this.#lastSnapshot = frame.snapshot;
+    return frame.snapshot;
+  }
+
+  #enqueueSnapshot({ onlyIfDirty = false } = {}) {
+    this.#cancelColdMemory();
+    this.#queuedOperations += 1;
+    const operation = this.#tail.then(async () => {
+      if (!this.isRunning) return { found: false, saved: [], skipped: [] };
+      if (onlyIfDirty && this.#generation <= this.#snapshotGeneration) return this.#lastSnapshot;
+      return this.#takeSnapshot();
+    });
+    this.#tail = operation.finally(() => { this.#queuedOperations -= 1; this.#armColdMemory(); }).then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  memoryDiagnostics() {
+    if (this.#closed || this.#queuedOperations || this.#pending.size || this.#active
+      || (this.isRunning && !this.#ready)) return Promise.resolve({ state: "unavailable-busy" });
+    if (!this.isRunning) return Promise.resolve({ state: "unavailable-not-running" });
+    // Synchronous reservation: never enqueue behind work or enter a host wait.
+    // Later executions and close retain the existing FIFO/drain owner.
+    this.#queuedOperations += 1;
+    const operation = this.#command("memory_diagnostics")
+      .then(frame => historyMemoryDiagnostics(frame.diagnostics), () => ({ state: "unavailable-error" }))
+      .finally(() => { this.#queuedOperations -= 1; this.#armColdMemory(); });
+    this.#tail = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  snapshot() {
+    if (this.#snapshotTimer) clearTimeout(this.#snapshotTimer);
+    this.#snapshotTimer = undefined;
+    return this.#enqueueSnapshot();
+  }
+
+  async close({ snapshot = true } = {}) {
+    this.#cancelColdMemory(true);
+    if (this.#closed) return;
+    this.#closed = true;
+    if (this.#snapshotTimer) clearTimeout(this.#snapshotTimer);
+    if (this.#interruptTimer) clearTimeout(this.#interruptTimer);
+    this.#snapshotTimer = undefined;
+    this.#interruptTimer = undefined;
+    await this.#tail;
+    if (!this.isRunning) return;
+    if (snapshot && this.#generation > this.#snapshotGeneration) {
+      try { await this.#takeSnapshot(); } catch {}
+    }
+    try {
+      await Promise.race([
+        this.#command("shutdown"),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("kernel shutdown timed out")), this.shutdownTimeoutMs)),
+      ]);
+    } catch {
+      this.#process?.kill("SIGTERM");
+    }
+    if (this.#process?.exitCode === null) {
+      await Promise.race([
+        new Promise((resolve) => this.#process?.once("exit", resolve)),
+        new Promise((resolve) => setTimeout(resolve, this.killTimeoutMs)),
+      ]);
+    }
+    if (this.#process?.exitCode === null) {
+      const child = this.#process;
+      const exited = new Promise((resolve) => child.once("exit", resolve));
+      child.kill("SIGKILL");
+      await exited;
+    }
+    this.#process = undefined;
+  }
+
+  #terminateOnControlError(error) {
+    this.#cancelColdMemory(true);
+    // A broken control channel is not execution completion. Keep promises pending
+    // until exit confirms that the controlled Python process can no longer write.
+    this.#controlError ??= error;
+    this.#active?.abortController.abort();
+    this.#process?.kill("SIGKILL");
+  }
+
+  #failAll(error) {
+    this.#coldSupported = false;
+    this.#cancelColdMemory(true);
+    // Queued cells may depend on mutations lost with this process. Require a
+    // new explicit execution instead of silently running them on a restore.
+    this.#failureEpoch += 1;
+    this.#active?.abortController.abort();
+    this.#rejectReady?.(error);
+    for (const pending of this.#pending.values()) pending.reject(error);
+    this.#pending.clear();
+  }
+}

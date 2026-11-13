@@ -1,0 +1,31 @@
+{
+  "name": "@local/persistent-harness",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Durable, detachable conversation-core sessions with persistent Python and retained child agents",
+  "scripts": {
+    "test": "node bin/package-load-smoke.mjs && node bin/run-tests.mjs all",
+    "test:package-load": "node bin/package-load-smoke.mjs",
+    "test:p0": "node bin/run-tests.mjs all test/session-paths.test.mjs test/session-actor.test.mjs",
+    "test:p1": "node bin/run-tests.mjs all test/protocol.test.mjs test/store-actor.test.mjs test/supervisor-actor.test.mjs",
+    "test:gate-p": "node bin/run-tests.mjs all test/e2e-persistent-sessions.test.mjs test/e2e-actor-recovery.test.mjs",
+    "provision:skills": "node bin/provision-skills.mjs",
+    "test:unit": "node bin/run-tests.mjs unit",
+    "test:integration": "node bin/run-tests.mjs integration",
+    "test:specs": "node bin/check-specs.mjs"
+  },
+  "bin": {
+    "harness-supervisor": "./bin/harness-supervisor.mjs",
+    "persistent-pi": "./bin/persistent-pi.mjs",
+    "persistent-harness-provision-skills": "./bin/provision-skills.mjs"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "croner": "10.0.1",
+    "ws": "8.21.0"
+  }
+}

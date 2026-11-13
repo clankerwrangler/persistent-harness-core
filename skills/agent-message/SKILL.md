@@ -1,0 +1,43 @@
+---
+name: agent-message
+description: Inspect the permitted family roster, send durable direct family messages, or (Home only) create and resolve human attention requests.
+---
+
+# Agent Message
+
+Import with `import harness_agent_message as agent_message` (the kernel also preloads `agent_message`).
+
+Use `agent_message.list_agents()` to inspect reachable agents. Reach is strictly local: an agent may address only its parent, direct children, and same-parent siblings. Grandparents, grandchildren, cousins, and other transitive relationships are rejected even when an exact stable ID is supplied.
+
+Use `agent_message.send(target, body)` for direct delivery. A busy target receives the message at the next safe input/tool checkpoint without interrupting a running tool. An idle target can start a turn. The operation commits synchronously and returns an awaitable `SkillResult`, so both `agent_message.send(...)` and `await agent_message.send(...)` are safe and perform exactly one host call. There is no broadcast operation, and sender identity always comes from the harness connection.
+
+Messages never produce an automatic reply. Send only an intentional, useful result or request; do not echo acknowledgements or respond solely because another agent sent a message.
+
+## Starting a root session (Home only)
+
+`agent_message.start_session(name, task, cwd)` opens a new root session named `name` in the absolute
+folder `cwd` and sends it `task` as a message from you, so it can reply to you. Only Home may
+call it; other sessions are refused.
+
+## Changing the default model (Home only)
+
+When the user asks to change models, call `agent_message.set_default_model(model, apply=False)` to preview, then with `apply=True`. `model` is a short name such as `terra`, which picks the newest match from the default provider, or an exact id. It moves the default and every session following it, including sleeping and stopped ones, without waking them. Busy sessions move at the end of their turn. Deliberately picked models, and children inheriting them, stay. To switch back, run it again with the earlier model. Report the moved count and anything left in `pinned`, `pending`, or `otherModels`.
+
+## Human attention (Home only)
+
+When the human must supply a decision, approval, or missing information, Home can use
+`agent_message.request_attention(key, title, body, expires_in=86400)` alongside its normal
+conversation explanation. Use explicit, concise plain text (title ≤120 characters,
+body ≤1000) and a stable key (≤128 letters, digits, `.`, `_`, `:`, `-`). The expiry is
+1–604800 seconds. Only Home may call it; other sessions are refused. Children send the need to their parent,
+and other rooms send it to Home.
+
+Reuse the same key when retrying the same request. Creation is durable and idempotent:
+retries do not reopen resolved/expired requests or extend deadlines. A genuinely new
+request needs a new key. Call `agent_message.resolve_attention(key)` when that specific
+need no longer requires human action. Read acknowledgement is not resolution; expiry
+means expired, not approved or completed. Notifications never grant permission, and
+creating one does not substitute for an interactive approval's live response mechanism.
+
+Routine progress and every-message alerts do not belong here. Family-idle status and
+explicitly intended cron deliveries are tracked separately by the supervisor.

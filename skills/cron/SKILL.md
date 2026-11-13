@@ -1,0 +1,136 @@
+---
+name: cron
+description: Create and manage durable scheduled agent jobs through the persistent harness.
+---
+
+# Scheduled jobs
+
+Use `await cron(...)` to manage durable jobs owned by the harness supervisor. The scheduler continues independently of the current Pi actor and records every claimed occurrence in durable history.
+
+Only a depth-zero root session may manage jobs. Isolated fresh scheduled sessions cannot manage the scheduler recursively. Origin-mode delivery into a live root does not turn that root into a scheduled session: it remains a user conversation, may manage jobs, and may spawn children.
+
+## Actions
+
+The `action` argument accepts `create`, `list`, `update`, `pause`, `resume`, `run`, `remove`, `history`, and `report`.
+
+Create a recurring origin-session job:
+
+```python
+await cron(
+    action="create",
+    name="Morning review",
+    prompt="Review the workspace status and report concrete blockers.",
+    schedule={"kind": "cron", "expression": "0 9 * * *"},
+    execution_mode="origin",
+    notification_intent="result",
+)
+```
+
+Create an isolated interval job:
+
+```python
+await cron(
+    action="create",
+    name="Periodic audit",
+    prompt="Run the bounded audit and summarize the result.",
+    schedule={"kind": "every", "intervalSeconds": 7200},
+    execution_mode="fresh",
+    repeat=6,
+)
+```
+
+Create a one-shot job:
+
+```python
+await cron(
+    action="create",
+    name="Reminder",
+    prompt="Remind the user to review the release.",
+    schedule={"kind": "at", "at": "2026-09-01T14:00:00"},
+)
+```
+
+Pin a model for every fire. Omit `provider` and `model` to use the global default at fire time:
+
+```python
+await cron(
+    action="create",
+    name="Pinned audit",
+    prompt="Run the bounded audit and summarize the result.",
+    schedule={"kind": "every", "intervalSeconds": 7200},
+    provider="grok-cli",
+    model="grok-4.6",
+)
+```
+
+Clear a pin with `provider=None, model=None` on `update`. `thinking_level` pins or clears the same way.
+
+Naive ISO timestamps and cron expressions use the supervisor's configured default timezone (`PI_HARNESS_CRON_TIMEZONE`, otherwise `UTC`) unless `timezone` is supplied in the schedule. Explicit ISO offsets remain absolute. Cron expressions must contain exactly five fields. Recurring intervals must be at least 300 seconds.
+
+Unpinned jobs use the global default model at the moment they fire, not the model that was current when the job was created. An explicit `provider` and `model` pin that model for later fires. `provider` and `model` must be supplied together.
+
+`execution_mode="fresh"` creates an isolated root session for every fire. `execution_mode="origin"` sends the job to the root session that created it, using automatic input behavior: it steers active work and starts a normal turn when idle. If that origin has been deleted, execution falls back to a fresh root and the run records the reason.
+
+Recurring jobs run forever when `repeat` is omitted or `None`; finite positive repeats are supported. One-shot jobs require exactly one run. A manual `run` does not consume the scheduled repeat count.
+
+Mutating actions identify a job by exact ID or case-insensitive live name. Use `selector` for `update`, `pause`, `resume`, `run`, `remove`, and `history`; use exact `run_id` for `report`. `history` returns bounded run records and visible output. `list` excludes removed jobs unless `include_removed=True`.
+
+Missed recurring occurrences collapse into one catch-up attempt. The same job never overlaps; an occurrence encountered while its prior run remains active is recorded as skipped. The default global limit is two concurrent runs. If the supervisor restarts during a run, that attempt becomes `unknown` and is never automatically replayed.
+
+Every run starts with the session's normal rules and skills, so a prompt needs only the task and the skill to follow. Do not schedule credential disclosure, unbounded side effects, or ambiguous destructive work.
+
+## Check commands
+
+A recurring job can have a check: a shell command that the scheduler runs at each occurrence instead of starting an agent. The agent runs only when the check prints something.
+
+```python
+await cron(
+    action="create",
+    name="New mail",
+    prompt="Tell the user about these new emails if they matter.",
+    schedule={"kind": "every", "intervalSeconds": 60},
+    execution_mode="origin",
+    check={"command": "python3 ~/bin/new-mail-check.py", "timeoutSeconds": 30},
+)
+```
+
+- If the check exits 0 without output, nothing happens.
+- If the check exits 0 with output, a run starts and the output follows the prompt under **Check output**. The output counts as delivered, so the check must remember what it has already printed, for example by saving its position in a file.
+- If the check exits nonzero or times out, the check failed. After three failures in a row, one run starts that reports the failure instead of doing the task. The next success resets the count.
+- A check runs as the agent's shell user, in the job's working directory, with a timeout from 1 through 120 seconds (default 30). Output is capped at 16 KiB.
+- A checked job can use intervals down to 60 seconds. A check is skipped while the job's previous run is still active; the next check catches up.
+- To remove a check, use `update` with `check=None`.
+
+
+## Notification intent and run disposition
+
+Choose `notification_intent` explicitly on `create` or `update`:
+- `result`: deliver a meaningful result or reminder to the human. A run that cannot
+  produce its promised result is visible as a delivery failure, not a fabricated result.
+- `conditional`: deliver only a concrete finding; explicitly report either `deliver`
+  or `no_finding` for the exact run after evaluating the condition.
+- `silent`: no human notification. Execution history remains available.
+
+Older calls that omit intent remain compatible and unclassified (`None`); they do not
+promise notification delivery. Updating intent affects future runs, not historical
+ones. Notification transport retry never reruns a scheduled job.
+
+Use the run ID from the authenticated cron input header (not an arbitrary remembered
+run). The root executing that run can report its disposition, including an isolated
+fresh root, without gaining scheduler-management rights:
+
+```python
+await cron(action="report", run_id="<exact run ID>", disposition="deliver",
+           body="The bounded check found a concrete problem requiring review.")
+# Or, after actually checking a conditional job:
+await cron(action="report", run_id="<exact run ID>", disposition="no_finding")
+```
+
+`deliver` requires nonblank plain text up to 1000 characters; `no_finding` accepts no
+body and is valid only for conditional runs. A repeated identical report is idempotent;
+a conflicting report or a first report after evaluation ends is rejected. A missing
+conditional disposition is visible as failure to establish the condition, never
+inferred from prose. Result runs may also report an explicit delivery body; otherwise
+the supervisor uses only visible assistant output bound to that run's input, never an
+older or subsequent unrelated answer. Generic family-idle alerts do not bypass a
+cron-only episode's notification intent.

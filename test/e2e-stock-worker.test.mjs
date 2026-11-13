@@ -1,0 +1,217 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import http from "node:http";
+import { cp, mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import { HarnessSupervisor } from "./fixtures/isolated-supervisor.mjs";
+import { coreFakeProvider, lastMessage } from "./fixtures/core-fake-provider.mjs";
+import { HarnessClient } from "../src/client.mjs";
+import { CronStore } from "../src/cron-store.mjs";
+import { runtimeVersions } from "../src/python-runtime.mjs";
+import { discoverSkillsFromDirectory } from "../src/skills.mjs";
+const { python: PYTHON_VERSION, ipython: IPYTHON_VERSION, dill: DILL_VERSION } = runtimeVersions;
+
+async function settled(client, id, text) {
+  let cleanup;
+  const done = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { cleanup(); reject(new Error(`settlement timeout for ${text}`)); }, 120_000);
+    const listener = frame => { if (frame.event === "actor_event" && frame.data?.sessionId === id && frame.data?.event?.type === "agent_settled") { cleanup(); resolve(); } };
+    cleanup = () => { clearTimeout(timer); client.off("event", listener); }; client.on("event", listener);
+  });
+  await client.request("submit_input", { sessionId: id, message: text, behavior: "auto" }); await done;
+}
+
+async function stockWorkerCase(t, { copyPrerequisites = cp, seed = process.env.PI_HARNESS_TEST_MANAGED_SEED } = {}) {
+  let root, cwd, agentDir, server, supervisor, client, cronStore, admission;
+  let pendingSetup = Promise.resolve();
+  const diagnosticStarted = performance.now();
+  const diagnosticPhases = new Set();
+  const diagnostic = phase => {
+    if (diagnosticPhases.has(phase)) return;
+    diagnosticPhases.add(phase);
+    t.diagnostic?.(`stock-worker phase=${phase} elapsedMs=${Math.round(performance.now() - diagnosticStarted)}`);
+  };
+  diagnostic("setup:start");
+  const previous = Object.fromEntries(["PI_CODING_AGENT_DIR", "PI_HARNESS_CORE_ARGS", "PI_HARNESS_CORE_SESSIONS", "PI_HARNESS_PYTHON"].map((key) => [key, process.env[key]]));
+  t.after(async () => {
+    diagnostic("cleanup:setup-drain:start");
+    await pendingSetup.catch(() => {});
+    diagnostic("cleanup:stop:start");
+    cronStore?.close(); await client?.stop(); await supervisor?.stop();
+    server?.closeAllConnections();
+    if (server?.listening) await new Promise(resolve => server.close(resolve));
+    for (const [key, value] of Object.entries(previous)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    diagnostic("cleanup:remove:start");
+    if (root) await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    diagnostic("cleanup:done");
+  });
+  pendingSetup = (async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), "sw-")); cwd = path.join(root, "project"); agentDir = path.join(root, "agent");
+    await mkdir(cwd); await mkdir(agentDir);
+    // Exercise real provisioning/consent, using only cached prerequisites when running offline.
+    if (seed) {
+      diagnostic("seed-copy:start");
+      await copyPrerequisites(seed, path.join(agentDir, "harness/kernel-runtime"), { recursive: true });
+      diagnostic("seed-copy:done");
+    }
+    t.signal.throwIfAborted();
+    diagnostic("setup:catalog:start");
+    const catalog = await discoverSkillsFromDirectory(path.resolve("skills"));
+    t.signal.throwIfAborted();
+    return catalog;
+  })();
+  const catalog = await pendingSetup; assert.deepEqual(catalog.diagnostics, []);
+  diagnostic("setup:done");
+  t.signal.throwIfAborted();
+  const dependencies = [...new Set(catalog.skills.flatMap(skill => skill.python?.dependencies ?? []))].sort();
+  const expectedRuntimeMessage = `Persistent Harness needs CPython ${PYTHON_VERSION} and:\n${[`ipython==${IPYTHON_VERSION}`, `dill==${DILL_VERSION}`, ...dependencies].join("\n")}`;
+  delete process.env.PI_HARNESS_PYTHON;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  const bodies = [];
+  let provisioningAnswered = false, provisioningError = null;
+  server = http.createServer(async (request, response) => {
+    let text = ""; for await (const chunk of request) text += chunk; const body = JSON.parse(text); bodies.push(body);
+    const last = lastMessage(body); const n = bodies.length;
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    const base = { id: `stock-${n}`, object: "chat.completion.chunk", created: 1, model: "fake-model" };
+    const send = delta => response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
+    if (last.role === "user") {
+      const content = JSON.stringify(last.content);
+      let code;
+      if (content.includes("NOTIFICATION_SCHEDULED_CHECK")) {
+        const run = cronStore.listActiveRunsForSession(admission.sessionId)[0]; assert(run);
+        code = `await cron(action="report", run_id=${JSON.stringify(run.runId)}, disposition="deliver", body="Official runtime exact finding"); print("CRON_REPORTED")`;
+      } else if (content.includes("RUN_CRON")) {
+        code = 'await cron(action="run", selector=notification_job["job"]["jobId"]); print("CRON_STARTED")';
+      } else if (content.includes("READ_STATE")) {
+        code = 'agent_message.resolve_attention("official-choice"); print("ACTUAL_PYTHON", persistent_probe + 1)';
+      } else {
+        code = 'persistent_probe = 41; agent_message.request_attention("official-choice", "Official runtime choice", "Choose this exact target"); notification_job = await cron(action="create", name="Official check", prompt="NOTIFICATION_SCHEDULED_CHECK", schedule={"kind":"every","intervalSeconds":300}, execution_mode="origin", notification_intent="conditional"); print("ACTUAL_PYTHON", persistent_probe)';
+      }
+      send({ role: "assistant", content: "" }); send({ tool_calls: [{ index: 0, id: `stock-call-${n}`, type: "function", function: { name: "ipython", arguments: JSON.stringify({ code }) } }] });
+      response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] })}\n\n`);
+    } else {
+      send({ role: "assistant", content: "" }); send({ content: "STOCK_WORKER_DONE" });
+      response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
+    }
+    response.write(`data: ${JSON.stringify({ ...base, choices: [], usage: { prompt_tokens: 12, completion_tokens: 2, total_tokens: 14 } })}\n\n`);
+    response.end("data: [DONE]\n\n");
+  });
+  diagnostic("server:start");
+  pendingSetup = new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  await pendingSetup; t.signal.throwIfAborted();
+  diagnostic("server:ready");
+  Object.assign(process.env, await coreFakeProvider(root, `http://127.0.0.1:${server.address().port}/v1`));
+  supervisor = new HarnessSupervisor({ socketPath: path.join(root, "s.sock"), databasePath: path.join(root, "harness.sqlite"), pidPath: path.join(root, "s.pid"),
+    skillsPath: path.resolve("skills"), actorInactivityMs: 0 });
+  diagnostic("supervisor:start");
+  pendingSetup = supervisor.start(); await pendingSetup; t.signal.throwIfAborted();
+  diagnostic("supervisor:ready");
+  client = new HarnessClient({ requestTimeoutMs: 120_000, socketPath: path.join(root, "s.sock"), heartbeatMs: 0, requestTimeoutMs: 120_000 });
+  diagnostic("client:start");
+  pendingSetup = client.start({ registrationType: "register_client", clientInstanceId: crypto.randomUUID() });
+  await pendingSetup; t.signal.throwIfAborted();
+  diagnostic("client:ready");
+  // This fixture alone consents to its expected disposable runtime installation.
+  // Unexpected human requests fail the test; production approval remains untouched.
+  client.on("event", frame => {
+    const e = frame.data?.event;
+    if (frame.event !== "actor_event" || e?.type !== "extension_ui_request" || !["confirm", "select", "input", "editor"].includes(e.method)) return;
+    diagnostic("consent:received");
+    void (async () => {
+      assert(admission && frame.data.sessionId === admission.sessionId);
+      assert.equal(e.method, "confirm"); assert.equal(e.title, "Install managed Python runtime?");
+      assert.equal(provisioningAnswered, false); assert.equal(typeof e.id, "string"); assert(e.id.length > 0);
+      assert.equal(process.env.PI_CODING_AGENT_DIR, agentDir); assert.equal(path.dirname(agentDir), root);
+      assert.equal(process.env.PI_HARNESS_PYTHON, undefined, "fixture must install inside its own agent directory");
+      assert.equal(e.message, expectedRuntimeMessage);
+      const current = supervisor.store.getSession(admission.sessionId);
+      assert(current.actorGeneration > 0 && current.lifecycle === "resident");
+      assert.equal(frame.data.actorGeneration, current.actorGeneration);
+      const snapshot = await client.request("subscribe_session", { selector: admission.sessionId, passive: true });
+      assert(snapshot.pendingUiRequests.some(request => request.id === e.id));
+      const notice = (await client.request("list_notifications")).notifications.find(n => n.source.requestId === e.id);
+      assert(notice); assert.equal(notice.state, "pending"); assert.equal(notice.kind, "attention");
+      assert.equal(notice.source.actorGeneration, current.actorGeneration);
+      // No conversation SSE clients exist; the first Python tool is still waiting.
+      assert.equal(current.activity, "working");
+      provisioningAnswered = true;
+      diagnostic("consent:reply:start");
+      await client.request("respond_extension_ui", { sessionId: admission.sessionId, uiRequestId: e.id, confirmed: true });
+      diagnostic("provisioning:pending");
+    })().catch(error => { provisioningError = error; });
+  });
+  diagnostic("session:start");
+  pendingSetup = client.request("create_root", { cwd, repositoryRoot: null, name: "stock-worker-smoke", provider: "harness-fake", model: "fake-model", thinkingLevel: null });
+  ({ admission } = await pendingSetup); t.signal.throwIfAborted();
+  cronStore = new CronStore(path.join(root, "harness.sqlite"));
+  pendingSetup = client.request("subscribe_session", { selector: admission.sessionId });
+  await pendingSetup; t.signal.throwIfAborted();
+  diagnostic("session:ready");
+  diagnostic("turn:initial:start");
+  try { await settled(client, admission.sessionId, "SET_STATE"); } catch(error) { throw provisioningError ?? error; }
+  diagnostic("turn:initial:done");
+  assert.equal(provisioningError, null); assert.equal(provisioningAnswered, true);
+  assert((await stat(path.join(agentDir, "harness/kernel-runtime/environments"))).isDirectory());
+  diagnostic("provisioning:done");
+  const attention = (await client.request("list_notifications")).notifications.find(n => n.source.key === "official-choice");
+  assert(attention); assert.equal(attention.body, "Choose this exact target");
+  assert.equal((await client.request("read_notification", { id: attention.id })).notification.state, "pending");
+  const pid = supervisor.store.getSession(admission.sessionId).actorPid; assert(pid);
+  diagnostic("turn:read-state:start");
+  await settled(client, admission.sessionId, "READ_STATE");
+  diagnostic("turn:read-state:done");
+  assert.equal(supervisor.store.getSession(admission.sessionId).actorPid, pid);
+  const { entries } = await client.request("get_actor_entries", { sessionId: admission.sessionId, since: null });
+  const users = entries.filter(e => e.type === "message" && e.message.role === "user");
+  const results = entries.filter(e => e.type === "message" && e.message.role === "toolResult");
+  assert.equal(users.length, 2); assert.equal(results.length, 2); assert(results.every(e => !e.message.isError));
+  assert.match(JSON.stringify(results[0]), /ACTUAL_PYTHON 41/); assert.match(JSON.stringify(results[1]), /ACTUAL_PYTHON 42/);
+  assert.equal(bodies.length, 4);
+  const { messages } = await client.request("get_visible_messages", { sessionId: admission.sessionId });
+  assert(messages.some(m => m.text === "STOCK_WORKER_DONE"));
+  assert.doesNotMatch(JSON.stringify(messages), /toolResult|thinkingSignature/);
+  assert.equal((await client.request("get_notification", { id: attention.id })).notification.state, "resolved");
+  diagnostic("turn:cron-run:start");
+  await settled(client, admission.sessionId, "RUN_CRON");
+  diagnostic("turn:cron-run:done");
+  diagnostic("cron-feed:start");
+  let delivered; const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    delivered = (await client.request("list_notifications")).notifications.find(n => n.kind === "cron");
+    if (delivered) break; await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert(delivered, "official cron report reaches the zero-SSE durable feed");
+  assert.equal(delivered.body, "Official runtime exact finding"); assert.equal(delivered.source.failed, false);
+  const run = cronStore.getRun(delivered.source.runId);
+  assert.equal(run.status, "completed"); assert.equal(run.notificationDisposition, "deliver");
+  assert.equal(cronStore.listRuns(run.jobId).length, 1);
+  assert.equal(provisioningError, null);
+  diagnostic("cron-feed:done");
+}
+
+test("stock worker: real supervisor, core worker, canonical input and persistent Python", { timeout: 360000 }, t => stockWorkerCase(t));
+
+test("cancelled stock setup drains its copy and cannot start late workers", async t => {
+  const controller = new AbortController(), copying = Promise.withResolvers(), release = Promise.withResolvers();
+  let cleanup, destination, cleaned = false, serverStarts = 0, actorStarts = 0;
+  const createServer = http.createServer, start = HarnessSupervisor.prototype.start;
+  t.mock.method(http, "createServer", (...args) => { serverStarts++; return createServer(...args); });
+  t.mock.method(HarnessSupervisor.prototype, "start", function (...args) { actorStarts++; return start.apply(this, args); });
+  const running = stockWorkerCase({ signal: controller.signal, after: fn => { cleanup = fn; } }, {
+    seed: "public-prerequisite-fixture", copyPrerequisites: async (_source, target) => {
+      destination = target; await mkdir(target, { recursive: true }); copying.resolve(); await release.promise;
+      await writeFile(path.join(target, "late-copy-marker"), "copied");
+    },
+  });
+  t.after(async () => { controller.abort(); release.resolve(); await running.catch(() => {}); await cleanup?.(); });
+  await copying.promise; assert.equal(typeof cleanup, "function");
+  const reason = new Error("controlled setup cancellation"); controller.abort(reason);
+  const rejected = assert.rejects(running, error => error === reason);
+  const closing = cleanup().then(() => { cleaned = true; });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(cleaned, false, "cleanup owns the pending copy");
+  release.resolve(); await rejected; await closing;
+  assert.equal(serverStarts, 0); assert.equal(actorStarts, 0);
+  await assert.rejects(stat(path.resolve(destination, "../../..")), { code: "ENOENT" });
+});

@@ -1,0 +1,81 @@
+--------------------------- MODULE VisibleOutputImages ---------------------------
+\* Sources:
+\*   src/core-transcript-reader.mjs sha256:4b2487304c758a1ac8b3a2026aa3430d95a6de56274b724272ae37316be68fa4
+\*   src/conversation-projection.mjs sha256:9cff939b4541fb403dd7af8947017d7c013c24e444c1a04c11b40ab9af86e503
+\*   src/input-images.mjs sha256:6325106ac1c28778a2f1ec2db7efbd13b72718990634894eb8e03ea2ba429076
+\*   src/supervisor.mjs sha256:8873880511b6679f9a6b6d0d3d3657c72b54e1512f7f853bbaf7f09b24b49eb9
+EXTENDS Naturals, Sequences
+CONSTANT Bug
+\* Request-time image authorization. Each request rereads the entry from the core's
+\* current chunk (older chunks and missing entries are unavailable); saved entries never
+\* change, so "unchanged" is the referenced entry still being the one saved.
+\* "input" also abstracts the image projection of verified internal actor inputs.
+VARIABLES source, root, active, reachable, sameOrigin, available, valid, unchanged,
+          phase, response, projected, rawInput, originalInput, references, visible,
+          validationDecodes, displayDecodes, hashReads
+vars == <<source, root, active, reachable, sameOrigin, available, valid, unchanged,
+          phase, response, projected, rawInput, originalInput, references, visible,
+          validationDecodes, displayDecodes, hashReads>>
+Sources == {"input", "toolImage", "toolText", "reasoning", "arguments", "custom", "file"}
+PNG == [type |-> "image", data |-> "pngBytes", mimeType |-> "image/png", name |-> "caller", size |-> 999]
+JPEG == [type |-> "image", data |-> "jpegBytes", mimeType |-> "image/jpeg", name |-> "caller", size |-> 999]
+ImageInputs == {<<>>, <<PNG>>, <<PNG, JPEG>>, <<JPEG, PNG>>}
+ByteSize(data) == IF data = "pngBytes" THEN 68 ELSE 517
+DefaultName(i) == IF i = 1 THEN "Pasted image 1" ELSE "Pasted image 2"
+OutputName(i) == IF i = 1 THEN "Output image 1" ELSE "Output image 2"
+Init == /\ source \in Sources
+        /\ root \in BOOLEAN /\ active \in BOOLEAN /\ reachable \in BOOLEAN
+        /\ sameOrigin \in BOOLEAN /\ available \in BOOLEAN /\ valid \in BOOLEAN
+        /\ unchanged \in BOOLEAN /\ phase = "request" /\ response = "none"
+        /\ projected = FALSE /\ rawInput \in ImageInputs /\ originalInput = rawInput
+        /\ references \in BOOLEAN /\ visible = <<>>
+        /\ validationDecodes = 0 /\ displayDecodes = 0 /\ hashReads = 0
+Eligible == source = "input" \/ (source = "toolImage" /\ root)
+Allowed == sameOrigin /\ reachable /\ available /\ active /\ Eligible /\ valid /\ unchanged
+Present == source = "input" \/ (source = "toolImage" /\ root /\ active /\ available /\ unchanged)
+\* Fresh candidates exclude caller name/size before metadata-enabled validation.
+Candidates == [i \in 1..Len(rawInput) |-> [type |-> rawInput[i].type,
+              data |-> rawInput[i].data, mimeType |-> rawInput[i].mimeType]]
+Normalized == [i \in 1..Len(Candidates) |-> [type |-> Candidates[i].type,
+               data |-> Candidates[i].data, mimeType |-> Candidates[i].mimeType,
+               name |-> IF Bug = "TrustCallerMetadata" THEN rawInput[i].name ELSE DefaultName(i),
+               size |-> ByteSize(Candidates[i].data)]]
+Payload(image, i) == IF references THEN [ref |-> [entryId |-> "entry", index |-> i - 1],
+                                       contentHash |-> <<image.mimeType, image.data>>]
+                    ELSE [data |-> image.data]
+Reused == [i \in 1..Len(Normalized) |-> [type |-> "image", mimeType |-> Normalized[i].mimeType,
+           name |-> IF source = "toolImage" THEN OutputName(i) ELSE Normalized[i].name,
+           size |-> Normalized[i].size, payload |-> Payload(Normalized[i], i)]]
+\* The old projection independently derives the fallback name and decodes for size.
+Baseline == [i \in 1..Len(rawInput) |-> [type |-> "image", mimeType |-> rawInput[i].mimeType,
+             name |-> IF source = "toolImage" THEN OutputName(i) ELSE DefaultName(i),
+             size |-> ByteSize(rawInput[i].data), payload |-> Payload(rawInput[i], i)]]
+Serve == /\ phase = "request" /\ phase' = "done"
+         /\ response' = IF Allowed THEN "imageBytes" ELSE "denied"
+         /\ projected' = (source = "toolImage" /\ root /\ active /\ available /\ valid /\ unchanged)
+         /\ visible' = IF Present /\ (valid \/ Bug = "SkipValidation") THEN Reused ELSE <<>>
+         /\ validationDecodes' = IF Present /\ Bug # "SkipValidation" THEN Len(rawInput) ELSE 0
+         /\ displayDecodes' = IF Present /\ valid /\ Bug = "KeepDisplayDecode" THEN Len(rawInput) ELSE 0
+         /\ hashReads' = IF Present /\ valid /\ references THEN Len(rawInput) ELSE 0
+         /\ UNCHANGED <<source, root, active, reachable, sameOrigin, available, valid, unchanged,
+                       rawInput, originalInput, references>>
+Next == Serve
+Boundary == response = "imageBytes" => sameOrigin /\ reachable /\ available /\ active
+OnlyImages == response = "imageBytes" => source \in {"input", "toolImage"}
+RootOutputsOnly == response = "imageBytes" /\ source = "toolImage" => root
+BoundedCanonicalBytes == response = "imageBytes" => valid /\ unchanged
+InputsPreserved == phase = "done" /\ source = "input" /\ sameOrigin /\ reachable
+                   /\ available /\ active /\ valid /\ unchanged => response = "imageBytes"
+OutputsDelivered == phase = "done" /\ source = "toolImage" /\ root /\ sameOrigin
+                    /\ reachable /\ available /\ active /\ valid /\ unchanged => response = "imageBytes"
+OutputPresentation == projected <=> (phase = "done" /\ source = "toolImage" /\ root
+                     /\ active /\ available /\ valid /\ unchanged)
+MetadataEquivalent == phase = "done" /\ Present /\ valid => visible = Baseline
+ValidationPreserved == phase = "done" /\ ~valid => visible = <<>>
+InputValuesPreserved == rawInput = originalInput
+\* Work counts abstract successful validation and hash consumption, not all processing.
+ProjectionWork == phase = "done" => /\ displayDecodes = 0
+                  /\ (Present /\ valid => validationDecodes = Len(rawInput))
+                  /\ hashReads = IF Present /\ valid /\ references THEN Len(rawInput) ELSE 0
+Spec == Init /\ [][Next]_vars
+=================================================================================

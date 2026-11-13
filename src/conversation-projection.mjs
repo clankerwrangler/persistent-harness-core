@@ -1,0 +1,307 @@
+import { birthOrder, timelineSequence } from "./conversation-birth.mjs";
+import { normalizeInputLocation } from "./input-location.mjs";
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { ACTOR_INPUT_MESSAGE_TYPE, actorInputCustomPayload, actorInputDigest } from "./protocol.mjs";
+import { normalizeInputImages } from "./input-images.mjs";
+import { sanitizePresentationText } from "./presentation-directive.mjs";
+
+const TRAILING_INPUT_MARKER = /\n\n<!-- persistent-harness-input:([^>\s]{1,128}) -->$/;
+export const SCHEDULED_JOB_ROLE = "scheduled_job";
+
+// Text the worker added for the model only (a message's time, a shared location):
+// part of the saved context, never shown.
+export function isHarnessBlock(part) { return part?.type === "text" && (part.harness === "time" || part.harness === "location"); }
+function contentText(content) {
+  return typeof content === "string" ? content
+    : Array.isArray(content) ? content.map((part) => part?.type === "text" && typeof part.text === "string" && !isHarnessBlock(part) ? part.text : "").join("") : "";
+}
+export function parseHarnessInput(text) {
+  const source = String(text ?? ""); const match = TRAILING_INPUT_MARKER.exec(source);
+  return match ? { inputId: match[1], text: source.slice(0, match.index) } : undefined;
+}
+export function cleanHarnessInput(text) { return parseHarnessInput(text)?.text ?? String(text ?? ""); }
+export function visibleContentText(content, { sanitizePresentation = false } = {}) {
+  const text = contentText(content);
+  return sanitizePresentation ? sanitizePresentationText(text).text : text;
+}
+
+function imageContentHash(image) {
+  return createHash("sha256").update(image.mimeType).update("\0").update(image.data, "base64").digest("hex");
+}
+
+function visibleUserImages(content, { references = false, entryId } = {}) {
+  if (!Array.isArray(content)) return [];
+  const candidates = content.filter((part) => part?.type === "image")
+    .map((part) => ({ type: "image", data: part.data, mimeType: part.mimeType }));
+  try {
+    return normalizeInputImages(candidates, { allowMetadata: true }).map((image, index) => ({
+      type: "image", mimeType: image.mimeType, name: image.name,
+      size: image.size,
+      ...(references ? { ref: { entryId, index }, contentHash: imageContentHash(image) } : { data: image.data }),
+    }));
+  } catch { return []; }
+}
+
+// Images a tool result shows the user: those the model also saw, then those shown to the user only.
+export function toolResultImages(message) {
+  const parts = [...(Array.isArray(message?.content) ? message.content : []), ...(Array.isArray(message?.details?.shownImages) ? message.details.shownImages : [])];
+  return parts.filter((part) => part?.type === "image").map((part) => ({ type: "image", data: part.data, mimeType: part.mimeType }));
+}
+
+// Shown-only images and attachments are meant for the user; other tool images are working material.
+export function toolImagesForUser(message) {
+  return message?.details?.imagesForUser === true || (Array.isArray(message?.details?.shownImages) && message.details.shownImages.length > 0);
+}
+
+function iso(value) { if (value === undefined || value === null) return null; const date = new Date(value); return Number.isNaN(date.valueOf()) ? null : date.toISOString(); }
+
+export function canonicalUserInputId(entry) {
+  return entry?.type === "message" && entry.message?.role === "user"
+    && typeof entry.message.id === "string" && entry.message.id ? entry.message.id : undefined;
+}
+
+export function inputIdForEntry(entry) {
+  if (entry?.type === "custom_message" && entry.customType === ACTOR_INPUT_MESSAGE_TYPE) return entry.details?.inputId;
+  if (entry?.type !== "message" || entry.message?.role !== "user") return undefined;
+  return canonicalUserInputId(entry) ?? parseHarnessInput(contentText(entry.message.content ?? entry.message.text))?.inputId;
+}
+
+export function canonicalInputContent(content) {
+  if (typeof content === "string") return { message: content, images: [] };
+  if (Array.isArray(content)) content = content.filter((part) => !isHarnessBlock(part));
+  if (!Array.isArray(content) || content.some((part) => !part || !["text", "image"].includes(part.type)
+    || (part.type === "text" && typeof part.text !== "string"))) throw new Error("canonical retry input has unsupported content");
+  return { message: visibleContentText(content), images: normalizeInputImages(content.filter((part) => part.type === "image")
+    .map((part) => ({ type: "image", data: part.data, mimeType: part.mimeType }))) };
+}
+
+export function canonicalActorInputContent(entry, receipt) {
+  if (entry.type === "message" && entry.message?.role === "user") {
+    const content = canonicalInputContent(entry.message.content ?? entry.message.text);
+    if (!canonicalUserInputId(entry)) content.message = cleanHarnessInput(content.message);
+    const location = normalizeInputLocation(entry.message.location);
+    return { ...content, ...(location === undefined ? {} : { location }) };
+  }
+  if (entry.type !== "custom_message" || entry.customType !== ACTOR_INPUT_MESSAGE_TYPE
+    || !["cron", "background"].includes(receipt?.source) || entry.details?.source !== receipt.source
+    || !isDeepStrictEqual(entry.details?.origin, receipt.origin) || entry.details?.acceptedAt !== iso(receipt.acceptedAt)
+    || (entry.details.clientMessageId != null && entry.details.clientMessageId !== receipt.clientMessageId)) {
+    throw new Error("canonical input has no verified internal provenance");
+  }
+  const content = canonicalInputContent(entry.content);
+  const envelope = { ...receipt, clientMessageId: entry.details.clientMessageId ?? null, images: [] };
+  // Older deployments used other user labels. Validate the full envelope and
+  // formatter as before; a label is display text and supplies no identity proof.
+  const userLabel = content.message.split("\n", 1)[0].match(/\bnot a new ([A-Za-z]{1,32}) submission\.$/u)?.[1] ?? "user";
+  const prefix = actorInputCustomPayload({ ...envelope, message: "" }, userLabel).content;
+  if (!content.message.startsWith(prefix)) throw new Error("canonical input does not match its formatter");
+  content.message = content.message.slice(prefix.length);
+  const expected = actorInputCustomPayload({ ...envelope, ...content }, userLabel);
+  if (!isDeepStrictEqual(expected.content, entry.content) || !isDeepStrictEqual(expected.details, entry.details)) {
+    throw new Error("canonical input does not match its formatter");
+  }
+  return content;
+}
+
+// A match is evidence, not an association. The complete inventory resolves identity.
+function actorInputEntryMatch(entry, receipt) {
+  if (inputIdForEntry(entry) !== receipt.inputId || (receipt.entryId != null && receipt.entryId !== entry.id)
+    || !iso(entry.timestamp)) return null;
+  try {
+    let kind;
+    if (entry.type === "message" && entry.message?.role === "user") {
+      kind = canonicalUserInputId(entry) ? "user-id" : "legacy-marker";
+      if (kind === "legacy-marker") {
+        const content = canonicalActorInputContent(entry, receipt);
+        if (typeof receipt.message === "string") {
+          if (receipt.message !== content.message
+            || !isDeepStrictEqual(normalizeInputImages(receipt.images), content.images)) return null;
+        } else if (typeof receipt.digest !== "string" || !["auto", "steer", "follow_up"].some((behavior) =>
+          actorInputDigest(content.message, JSON.stringify(content.images), behavior) === receipt.digest)) return null;
+      }
+      // Canonical IDs survive expansions. Identity proof needs no body reread.
+      if (["cron", "background"].includes(receipt.source)) actorInputCustomPayload({ ...receipt, message: "", images: [] });
+    } else if (entry.type === "custom_message" && entry.customType === ACTOR_INPUT_MESSAGE_TYPE) {
+      // Only the worker adds these entries: its input id and source identify it.
+      if (entry.details?.source !== receipt.source) return null;
+      kind = "custom";
+    } else return null;
+    return { inputId: receipt.inputId, kind, source: receipt.source, origin: receipt.origin,
+      acceptedAt: receipt.acceptedAt, clientMessageId: receipt.clientMessageId };
+  } catch { return null; }
+}
+
+export function actorInputRenderEvidence(entry) {
+  const kind = canonicalUserInputId(entry) ? "user-id" : entry.type === "custom_message" ? "custom" : "legacy-marker";
+  const evidence = { id: entry.id, inputId: inputIdForEntry(entry), timestamp: entry.timestamp, kind };
+  try {
+    if (kind === "legacy-marker") {
+      const content = canonicalActorInputContent(entry);
+      evidence.digests = ["auto", "steer", "follow_up"].map(behavior => actorInputDigest(content.message, JSON.stringify(content.images), behavior));
+    } else if (kind === "custom") evidence.source = entry.details?.source;
+  } catch { evidence.invalid = true; }
+  return evidence;
+}
+function actorInputRenderMatch(evidence, receipt) {
+  if (evidence.invalid || evidence.inputId !== receipt.inputId
+    || (receipt.entryId != null && receipt.entryId !== evidence.id) || !iso(evidence.timestamp)) return null;
+  try {
+    if (evidence.kind === "legacy-marker") {
+      if (typeof receipt.message === "string") {
+        if (actorInputDigest(receipt.message, JSON.stringify(normalizeInputImages(receipt.images)), "auto") !== evidence.digests[0]) return null;
+      } else if (!evidence.digests.includes(receipt.digest)) return null;
+    }
+    // A cron or background entry is identified by its input id and source, as in actorInputEntryMatch.
+    if (evidence.kind === "custom") {
+      if (evidence.source !== receipt.source) return null;
+    } else if (["cron", "background"].includes(receipt.source)) actorInputCustomPayload({ ...receipt, message: "", images: [] });
+    return { inputId: receipt.inputId, kind: evidence.kind, source: receipt.source, origin: receipt.origin,
+      acceptedAt: receipt.acceptedAt, clientMessageId: receipt.clientMessageId };
+  } catch { return null; }
+}
+
+// Each physical verifier still reads relevant canonical entries at its trusted boundary.
+export function createActorInputAssociation({ sessionId, inputReceipt: receipt } = {}) {
+  const eligible = receipt && sessionId && receipt.sessionId === sessionId && typeof receipt.inputId === "string"
+    && receipt.inputId.length > 0 && receipt.inputId.length <= 128 && receipt.outcome !== "handled"
+    && Number.isSafeInteger(receipt.acceptedAt) && iso(receipt.acceptedAt)
+    && [null, "user", "cron", "background"].includes(receipt.source);
+  let strong = null, legacy = null, strongCount = 0, legacyCount = 0, unknownStrong = false, unknownLegacy = false;
+  const addMatch = (entry, proof) => {
+    if (!proof) return;
+    const match = { entryId: entry.id, deliveredAt: entry.timestamp, proof };
+    if (receipt.entryId != null || proof.kind !== "legacy-marker") {
+      strongCount = Math.min(2, strongCount + 1); strong = match;
+    } else { legacyCount = Math.min(2, legacyCount + 1); legacy = match; }
+  };
+  return {
+    add(entry) { if (eligible) addMatch(entry, actorInputEntryMatch(entry, receipt)); },
+    addRenderEvidence(evidence) { if (eligible) addMatch(evidence, actorInputRenderMatch(evidence, receipt)); },
+    incomplete({ entryId, kind }) {
+      if (!eligible || (receipt.entryId != null && receipt.entryId !== entryId)) return;
+      if (kind === "custom" && !["cron", "background"].includes(receipt.source)) return;
+      if (receipt.entryId === entryId || kind !== "legacy-marker") unknownStrong = true;
+      else unknownLegacy = true;
+    },
+    result({ complete = true } = {}) {
+      if (strongCount > 1 || unknownStrong) return { state: "unresolved" };
+      if (strongCount === 1) return { state: "proven", ...strong };
+      if (unknownLegacy || legacyCount > 1 || (legacyCount && !complete)) return { state: "unresolved" };
+      return legacyCount === 1 ? { state: "proven", ...legacy } : { state: "absent" };
+    },
+  };
+}
+
+export function resolveActorInputAssociation(entries, { complete = true, ...options } = {}) {
+  const association = createActorInputAssociation(options);
+  for (const entry of entries ?? []) association.add(entry);
+  return association.result({ complete });
+}
+
+export function associateVisibleInput(message, entry, association) {
+  if (!message || association?.state !== "proven" || association.entryId !== entry.id) return message;
+  const proof = association.proof;
+  return { ...message, inputId: proof.inputId, role: publicInputRole(proof.source),
+    text: proof.kind === "legacy-marker" ? cleanHarnessInput(message.text) : message.text,
+    source: proof.source, origin: proof.origin, createdAt: iso(association.deliveredAt),
+    delivery: { state: "delivered", inputId: proof.inputId, acceptedAt: iso(proof.acceptedAt), deliveredAt: iso(association.deliveredAt) },
+    ...(proof.clientMessageId ? { clientMessageId: proof.clientMessageId } : {}) };
+}
+
+export function publicInputRole(source) { return source === "cron" ? SCHEDULED_JOB_ROLE : source === "background" ? "background_notification" : "user"; }
+
+export function pendingInputMessage(input) {
+  return { id: input.inputId, role: publicInputRole(input.source), text: input.message ?? "",
+    createdAt: iso(input.acceptedAt ?? input.createdAt), status: "complete", delivery: input.delivery,
+    source: input.source, origin: input.origin, behavior: input.behavior, ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
+    ...(input.images?.length ? { images: input.images.map((image, index) => ({ type: "image", mimeType: image.mimeType,
+      ref: { entryId: input.inputId, index }, contentHash: imageContentHash(image), size: Buffer.from(image.data, "base64").length })) } : {}) };
+}
+export function projectVisibleMessage(entry, { streaming = false, imageReferences = false, sanitizePresentation = false,
+  inputAssociation, canonicalEntries, sessionId, inputReceipt, allowToolImages = false } = {}) {
+  const association = inputAssociation ?? (inputReceipt ? resolveActorInputAssociation(canonicalEntries ?? [entry],
+    { sessionId, inputReceipt, complete: canonicalEntries !== undefined }) : null);
+  if (entry?.type === "custom_message" && entry.customType === ACTOR_INPUT_MESSAGE_TYPE) {
+    const details = entry.details;
+    if (!["cron", "background"].includes(details?.source) || typeof details.inputId !== "string" || !details.inputId || details.inputId.length > 128
+      || !iso(details.acceptedAt) || !iso(entry.timestamp)) return undefined;
+    const images = visibleUserImages(entry.content, { references: imageReferences, entryId: entry.id });
+    return associateVisibleInput({ id: entry.id, role: publicInputRole(details.source), text: contentText(entry.content),
+      ...(images.length ? { images } : {}), source: details.source, origin: details.origin,
+      createdAt: iso(details.acceptedAt), status: "complete" }, entry, association);
+  }
+  if (entry?.type !== "message") return undefined;
+  const message = entry.message;
+  if (allowToolImages && message?.role === "toolResult") {
+    const images = visibleUserImages(toolResultImages(message), { references: imageReferences, entryId: entry.id })
+      .map((image, index) => ({ ...image, name: `Output image ${index + 1}` }));
+    if (!images.length) return undefined;
+    return { id: entry.id, role: "tool_output", text: "", images, ...(toolImagesForUser(message) ? { forUser: true } : {}),
+      createdAt: iso(message.timestamp ?? entry.timestamp), status: "complete" };
+  }
+  if (!message || !["user", "assistant"].includes(message.role)) return undefined;
+  const content = message.content ?? message.text;
+  const text = visibleContentText(content, { sanitizePresentation: sanitizePresentation && message.role === "assistant" });
+  if (message.role === "assistant" && !text && !streaming) return undefined;
+  const images = message.role === "user" ? visibleUserImages(content, { references: imageReferences, entryId: entry.id }) : [];
+  return associateVisibleInput({ id: String(entry.id ?? message.id ?? `message-${entry.timestamp ?? Date.now()}`), role: message.role, text,
+    ...(images.length ? { images } : {}), createdAt: iso(message.timestamp ?? entry.timestamp), status: streaming ? "streaming" : "complete" }, entry, association);
+}
+export function projectVisibleMessages(entries, options = {}) {
+  const source = Array.isArray(entries) ? entries : [], associations = new Map();
+  for (const entry of source) {
+    const inputId = inputIdForEntry(entry); if (!inputId) continue;
+    if (!associations.has(inputId)) {
+      const inputReceipt = options.inputReceiptReader?.(inputId, options.sessionId) ?? options.inputReceipt;
+      associations.set(inputId, createActorInputAssociation({ ...options, inputReceipt }));
+    }
+    associations.get(inputId).add(entry);
+  }
+  for (const [inputId, verifier] of associations) associations.set(inputId, verifier.result());
+  return source.map((entry) => projectVisibleMessage(entry, { ...options, inputAssociation: associations.get(inputIdForEntry(entry)) })).filter(Boolean);
+}
+
+export function assistantTextPart(message, contentIndex, { entryId, timestamp, sanitizePresentation = false } = {}) {
+  const part = message?.content?.[contentIndex];
+  if (message?.role !== "assistant" || part?.type !== "text" || typeof part.text !== "string") return undefined;
+  let providerId;
+  if (typeof part.textSignature === "string" && part.textSignature.length <= 2048) {
+    try {
+      const signature = JSON.parse(part.textSignature);
+      if (signature?.v === 1 && typeof signature.id === "string" && signature.id.length > 0
+        && signature.id.length <= 512 && !/[\u0000-\u001f\u007f]/.test(signature.id)) providerId = signature.id;
+    } catch {}
+  }
+  const startedAt = message.timestamp ?? timestamp;
+  // The core saves when each text's first words arrived; the reply's own time is when
+  // its request began, before reasoning shown meanwhile.
+  const date = new Date(Number.isSafeInteger(part.startedAt) && part.startedAt >= 0 ? part.startedAt : startedAt);
+  const textId = typeof part.id === "string" && part.id.length > 0 && part.id.length <= 128
+    && !/[\u0000-\u001f\u007f]/.test(part.id) ? part.id : undefined;
+  // A core text item keeps its identity when early execution rebases its segment.
+  // Provider signatures and segment positions identify only legacy entries.
+  const base = textId ? `assistant-${createHash("sha256").update(textId).digest("hex")}`
+    : providerId ? `assistant-${createHash("sha256").update(String(message.provider ?? "")).update("\0").update(providerId).digest("hex")}`
+      : typeof message.id === "string" && message.id ? `assistant-${createHash("sha256").update(message.id).digest("hex")}-text-${contentIndex}`
+      : entryId ? `${entryId}-text-${contentIndex}`
+        : Number.isSafeInteger(startedAt) && startedAt >= 0 ? `assistant-${startedAt}-text-${contentIndex}` : undefined;
+  if (!base || Number.isNaN(date.valueOf())) return undefined;
+  return { id: base, role: "assistant", text: sanitizePresentation ? sanitizePresentationText(part.text).text : part.text,
+    contentIndex, createdAt: date.toISOString(), ...birthOrder(part.harnessBirth), status: "complete", ...(entryId ? { entryId } : {}) };
+}
+
+export function assistantMessageParts(entry, options = {}) {
+  if (entry?.type !== "message" || entry.message?.role !== "assistant" || !Array.isArray(entry.message.content)) return [];
+  return entry.message.content.map((_part, index) => assistantTextPart(entry.message, index,
+    { ...options, entryId: entry.id, timestamp: entry.timestamp })).filter((part) => part?.text);
+}
+
+export function sortVisibleHistory(items) {
+  return items.sort((left, right) => {
+    const row = item => item.kind === "message" ? item.message : item;
+    const a = Date.parse(row(left).createdAt), b = Date.parse(row(right).createdAt);
+    return Number.isFinite(a) && Number.isFinite(b) ? a - b
+      || timelineSequence(row(left).timelineSequence) - timelineSequence(row(right).timelineSequence) : 0;
+  });
+}
