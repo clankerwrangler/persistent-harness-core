@@ -72,7 +72,7 @@ const IPYTHON_TOOL = {
   description: "Execute Python in this session's persistent IPython namespace. Use skill? for full skill instructions.",
   promptSnippet: "Execute Python in the persistent namespace; use skill? to inspect any skill's SKILL.md.",
   promptGuidelines: [
-    "Use Python for all execution; ordinary Pi tools are unavailable.",
+    "Use Python for all execution.",
     "Inspect a skill with skill? before first use when its workflow is relevant.",
   ],
   parameters: {

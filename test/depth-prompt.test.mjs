@@ -59,7 +59,7 @@ const defaultBasePrompt = [
   "- ipython: Execute Python",
   "",
   "Guidelines:",
-  "- Use Python for all execution; ordinary Pi tools are unavailable.",
+  "- Use Python for all execution.",
   PI_DEFAULT_BE_CONCISE_GUIDELINE,
   "- Show file paths clearly when working with files",
   "",

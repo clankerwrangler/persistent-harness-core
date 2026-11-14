@@ -130,7 +130,7 @@ export function skillPrompt(skills, nativeAsync = false) {
   });
   return [
     "# Persistent Python skill interface",
-    "`ipython` is the only execution tool. Ordinary Pi tools are unavailable.",
+    "`ipython` is the only execution tool.",
     "Every skill is one Python object. Use `<skill>?` to display its complete SKILL.md.",
     "If a skill has Python backing, call `<skill>(...)` when it defines an entry point or `<skill>.operation(...)`.",
     "Calling a guidance-only skill raises a clear error; read its instructions with `?` and follow them using Python or backed skills.",
