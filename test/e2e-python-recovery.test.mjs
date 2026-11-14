@@ -39,6 +39,7 @@ test("a restored namespace mismatch reaches the next provider request", { skip: 
   assert(session?.sessionFile);
   await f.client.request("stop_session", { sessionId: f.sessionId });
   await rm(`${session.sessionFile}.kernel-state`, { recursive: true, force: true });
+  await access(`${session.sessionFile}.python-steps.json`);
   await f.client.request("submit_input", { sessionId: f.sessionId, message: "resume namespace", behavior: "auto" });
   await until(async () => (await f.visible()).some((row) => row.text === "MISMATCH_REPORTED"), "the mismatch answer");
   t.diagnostic(`synthetic resumed provider body: ${Buffer.byteLength(JSON.stringify(resumedBody))} bytes; one body-only review before this kernel is latched`);
@@ -67,7 +68,7 @@ test("a cell planned before an in-flight kernel replacement does not run", { ski
   assert.equal(await access(path.join(f.cwd, "SHOULD_NOT_EXIST")).then(() => true, () => false), false);
 });
 
-test("expired historical recovery facts are reported as unknown across checkpoints", { skip: !ready && "core or Python runtime not configured", timeout: 120_000 }, async (t) => {
+test("without a step record, expired historical recovery facts are reported as unknown across checkpoints", { skip: !ready && "core or Python runtime not configured", timeout: 120_000 }, async (t) => {
   let f;
   f = await coreLiveFixture(t, "namespace-expired", ({ response, body, index, send, done }) => {
     if (index === 1) {
@@ -92,6 +93,8 @@ test("expired historical recovery facts are reported as unknown across checkpoin
   try { await core.checkpoint([{ role: "user", content: [{ type: "text", text: "edited context" }] }]); }
   finally { await core.close(); }
   await rm(path.join(session.sessionFile, "log/000001.payload.jsonl"));
+  // A session with no step record of its own (one from before the record existed) reads history.
+  await rm(`${session.sessionFile}.python-steps.json`);
   await f.client.request("submit_input", { sessionId: f.sessionId, message: "resume after expiration", behavior: "auto" });
   await until(async () => (await f.visible()).some((row) => row.text === "EXPIRED_HISTORY_REPORTED"), "the expired-history answer");
 });

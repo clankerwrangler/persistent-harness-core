@@ -117,6 +117,7 @@ export class CoreWorker {
       history: (options) => this.core.history(options),
       ensureKernel: () => this.#ensureKernel(), currentKernel: () => this.kernel,
       restore: () => this.lastRestore, nativeAsync: () => nativeAsyncEnabled(this.model),
+      stepsPath: options.sidecarBase ? `${options.sidecarBase}.python-steps.json` : undefined,
     });
     this.manifest = undefined;
     this.runtime = new PythonRuntimeManager({ runtimeDir: path.join(agentDir, "harness", "kernel-runtime") });
@@ -430,9 +431,11 @@ export class CoreWorker {
       diagnostic = await this.pythonRecovery.reconcile();
       return this.#blockedPython(diagnostic);
     }
+    await this.pythonRecovery.stepStarted(call);
     const result = await this.#executePython(args?.code, signal, call, previousKernel);
     this.pythonRecovery.invalidateHistory();
     const { content, details } = pythonToolResult(result);
+    await this.pythonRecovery.stepFinished(call, details);
     if (previousKernel && previousKernel !== this.kernel) {
       diagnostic = await this.pythonRecovery.reconcile({ role: "toolResult", toolName: "ipython", toolCallId: call,
         isError: details?.ok === false, details });
@@ -535,7 +538,8 @@ export class CoreWorker {
       ? { version: 1, sessionId: this.sessionId, toolCallId: call, actorGeneration: this.actorGeneration } : undefined;
     const result = await kernel.execute(code, { signal, onUpdate: () => {}, toolContext: this.hostContext(),
       namespaceCheckpoint, checkpointInBackground: Boolean(namespaceCheckpoint),
-      onCheckpoint: (outcome) => {
+      onCheckpoint: async (outcome) => {
+        await this.pythonRecovery.stepCheckpointed(call, outcome);
         if (outcome.ok) return;
         void this.core.addContext({ customType: "persistent-harness-checkpoint-failure",
           content: `Python namespace save failed after execution for call ${call}: ${outcome.error}. `

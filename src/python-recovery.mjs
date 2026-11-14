@@ -1,5 +1,8 @@
-// Reconcile the restored Python namespace with canonical tool-result history.
-// The core only supplies generic projected history; all Python interpretation stays here.
+// Reconcile the restored Python namespace with the session's Python steps. The session's own
+// step record (python-steps.mjs) answers this; canonical tool-result history is read only
+// once, to start that record for a session that has none yet.
+import { rm } from "node:fs/promises";
+import { PythonStepLog } from "./python-steps.mjs";
 
 const SELECT = Object.freeze({
   where: { role: "toolResult", toolName: "ipython" },
@@ -72,10 +75,44 @@ function hasNamespaceHistory(entries) {
 }
 
 export class PythonRecovery {
-  constructor({ history, ensureKernel, currentKernel, restore, nativeAsync }) {
-    Object.assign(this, { history, ensureKernel, currentKernel, restore, nativeAsync });
+  constructor({ history, ensureKernel, currentKernel, restore, nativeAsync, stepsPath }) {
+    Object.assign(this, { history, ensureKernel, currentKernel, restore, nativeAsync, stepsPath });
     this.state = null;
     this.noNamespaceHistory = false;
+    // undefined: not read yet; null: none (history is read instead).
+    this.steps = stepsPath ? undefined : null;
+  }
+
+  /** Before a cell runs, after it returned, and when its background save ended. */
+  stepStarted(toolCallId) { return this.#step((log) => log.started(toolCallId)); }
+  stepFinished(toolCallId, details) { return this.#step((log) => log.finished(toolCallId, details)); }
+  stepCheckpointed(toolCallId, outcome) { return this.#step((log) => log.checkpointed(toolCallId, outcome)); }
+
+  // A record that cannot be written is removed, so the next start reads history again.
+  async #step(change) {
+    const log = this.steps;
+    if (!log) return;
+    try { await change(log); }
+    catch { this.steps = null; await rm(this.stepsPath, { force: true }).catch(() => {}); }
+  }
+
+  async #stepLog() {
+    if (this.steps === undefined) this.steps = await PythonStepLog.load(this.stepsPath);
+    return this.steps;
+  }
+
+  // The record starts from what history shows now. The expected call that history lists
+  // only when the restored namespace does not match it is kept apart.
+  async #startStepLog(entries) {
+    if (!this.stepsPath || this.steps) return;
+    const unmatched = projectNamespaceRecovery(entries, null);
+    const matched = projectNamespaceRecovery(entries, { namespaceCheckpoint: unmatched.expectedCheckpoint });
+    const key = (item) => `${item.toolCallId}\u0000${item.state}`, listed = new Set(matched.interruptedOrUncheckpointed.map(key));
+    const pending = unmatched.interruptedOrUncheckpointed.find((item) => !listed.has(key(item))) ?? null;
+    try {
+      this.steps = await PythonStepLog.create(this.stepsPath, { expected: unmatched.expectedCheckpoint,
+        legacy: matched.interruptedOrUncheckpointed, pending, incomplete: unmatched.historyIncomplete });
+    } catch { this.steps = null; await rm(this.stepsPath, { force: true }).catch(() => {}); }
   }
 
   invalidateHistory() { this.noNamespaceHistory = false; }
@@ -84,12 +121,16 @@ export class PythonRecovery {
     const current = this.currentKernel();
     if (!extra && !this.nativeAsync() && this.noNamespaceHistory) return "";
     if (!extra && current?.isRunning && this.state?.kernel === current) return namespaceRecoveryText(this.state.report);
+    const log = await this.#stepLog();
+    if (log) return this.#reconcileFromSteps(log, extra);
     const entries = await this.history({ from: 1, select: SELECT });
     if (extra) entries.push({ type: "message", message: extra });
     if (!this.nativeAsync() && !hasNamespaceHistory(entries)) {
+      await this.#startStepLog(entries);
       this.state = null; this.noNamespaceHistory = true; return "";
     }
     this.noNamespaceHistory = false;
+    await this.#startStepLog(entries);
     let kernel;
     try { kernel = await this.ensureKernel(); }
     catch (error) {
@@ -99,6 +140,21 @@ export class PythonRecovery {
     }
     if (!this.state || this.state.kernel !== kernel || extra) {
       this.state = { kernel, visible: false, report: projectNamespaceRecovery(entries, this.restore()) };
+    }
+    return namespaceRecoveryText(this.state.report);
+  }
+
+  // `extra`, a result just returned, is already in the step record.
+  async #reconcileFromSteps(log, extra) {
+    if (!this.nativeAsync() && !log.hasFindings) { this.state = null; return ""; }
+    let kernel;
+    try { kernel = await this.ensureKernel(); }
+    catch (error) {
+      this.state = { kernel: null, visible: false, report: log.report({ error: error instanceof Error ? error.message : String(error) }) };
+      return namespaceRecoveryText(this.state.report);
+    }
+    if (!this.state || this.state.kernel !== kernel || extra) {
+      this.state = { kernel, visible: false, report: log.report(this.restore()) };
     }
     return namespaceRecoveryText(this.state.report);
   }
