@@ -117,7 +117,7 @@ async function stockWorkerCase(t, { copyPrerequisites = cp, seed = process.env.P
   // Unexpected human requests fail the test; production approval remains untouched.
   client.on("event", frame => {
     const e = frame.data?.event;
-    if (frame.event !== "actor_event" || e?.type !== "extension_ui_request" || !["confirm", "select", "input", "editor"].includes(e.method)) return;
+    if (frame.event !== "actor_event" || e?.type !== "dialog_request" || !["confirm", "select", "input", "editor"].includes(e.method)) return;
     diagnostic("consent:received");
     void (async () => {
       assert(admission && frame.data.sessionId === admission.sessionId);
@@ -138,7 +138,7 @@ async function stockWorkerCase(t, { copyPrerequisites = cp, seed = process.env.P
       assert.equal(current.activity, "working");
       provisioningAnswered = true;
       diagnostic("consent:reply:start");
-      await client.request("respond_extension_ui", { sessionId: admission.sessionId, uiRequestId: e.id, confirmed: true });
+      await client.request("respond_dialog", { sessionId: admission.sessionId, uiRequestId: e.id, confirmed: true });
       diagnostic("provisioning:pending");
     })().catch(error => { provisioningError = error; });
   });

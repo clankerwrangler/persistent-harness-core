@@ -75,7 +75,7 @@ const requestTypes = new Set([
   "request_attention", "resolve_attention", "list_notifications", "get_notification", "read_notification", "dismiss_notification", "claim_notification_delivery", "record_notification_delivery",
   "stop_child", "revive_child", "delete_child",
   "create_root", "list_sessions", "rename_session", "subscribe_session", "unsubscribe_session", "subscribe_root_output", "unsubscribe_root_output",
-  "submit_input", "respond_extension_ui", "get_session_inference", "set_session_inference", "set_default_inference", "set_session_fast_mode", "get_actor_state", "get_actor_entries", "get_visible_messages", "get_visible_image", "compact_session", "restart_kernel", "abort_session",
+  "submit_input", "respond_dialog", "get_session_inference", "set_session_inference", "set_default_inference", "set_session_fast_mode", "get_actor_state", "get_actor_entries", "get_visible_messages", "get_visible_image", "compact_session", "restart_kernel", "abort_session",
   "get_skill_runtime_plan", "provision_skill_runtime",
   "stop_session", "revive_session", "delete_session", "get_memory_diagnostics", "get_liveness", "get_status", "get_usage", "shutdown_daemon",
 ]);
@@ -214,7 +214,7 @@ function actorInputDelivery(params) {
   if (!Number.isFinite(Date.parse(deliveredAt))) throw new ProtocolError("invalid_request", "params.deliveredAt must be an ISO timestamp");
   return { inputId: string(value.inputId, "params.inputId", 128), entryId: string(value.entryId, "params.entryId", 128), deliveredAt };
 }
-function extensionUiResponse(params) {
+function dialogResponse(params) {
   const { value, sessionId } = sessionIdParam(params, ["uiRequestId", "value", "confirmed", "cancelled"]);
   const result = { sessionId, uiRequestId: string(value.uiRequestId, "params.uiRequestId", 128) };
   if (value.value !== undefined) {
@@ -428,7 +428,7 @@ const validators = new Map([
   ["ack_message", (p) => { const value = record(p, "params"); exact(value, new Set(["messageId"]), "params"); return { messageId: string(value.messageId, "params.messageId", 128) }; }],
   ["spawn_child", spawnChild], ["stop_child", childSelector], ["revive_child", childSelector], ["delete_child", childSelector],
   ["create_root", createRoot], ["rename_session", renameSession], ["subscribe_session", subscribe], ["subscribe_root_output", subscribeRootOutput], ["unsubscribe_root_output", empty],
-  ["unsubscribe_session", (p) => sessionIdParam(p)], ["submit_input", submit], ["respond_extension_ui", extensionUiResponse],
+  ["unsubscribe_session", (p) => sessionIdParam(p)], ["submit_input", submit], ["respond_dialog", dialogResponse],
   ["get_session_inference", (p) => ({ sessionId: sessionIdParam(p).sessionId })], ["set_session_inference", setInference], ["set_default_inference", setDefaultInference], ["set_session_fast_mode", setFastMode],
   ["get_memory_diagnostics", (p) => ({ sessionId: sessionIdParam(p).sessionId })],
   ["get_actor_state", (p) => sessionIdParam(p)], ["get_actor_entries", entries], ["get_visible_messages", visibleMessages], ["get_visible_image", visibleImage], ["compact_session", (p) => sessionIdParam(p)], ["restart_kernel", (p) => sessionIdParam(p)], ["abort_session", (p) => sessionIdParam(p)],

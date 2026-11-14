@@ -431,7 +431,7 @@ export class HarnessSupervisor {
   #skillGrantPromises = new Map();
   #runtimeReadinessPromises = new Map();
   #sessionMutationTails = new Map();
-  #extensionUiRequests = new Map();
+  #dialogRequests = new Map();
   #actorConnectionWaiters = new Map();
   #skillCatalogDiagnostic;
   #sessionHistoryDiagnostic;
@@ -746,17 +746,17 @@ export class HarnessSupervisor {
   #requestOperation(state, request) {
     const { type, params } = request;
     // A continuation uses its existing pending owner, not a new-work admission slot.
-    if (state.role === "client" && type === "respond_extension_ui") {
+    if (state.role === "client" && type === "respond_dialog") {
       if (!state.subscriptions.has(params.sessionId)) throw requestFailure("stale_ui_request", "client is not subscribed to the pending action request");
-      const key = `${params.sessionId}\0${params.uiRequestId}`; const pending = this.#extensionUiRequests.get(key);
+      const key = `${params.sessionId}\0${params.uiRequestId}`; const pending = this.#dialogRequests.get(key);
       const actor = this.#actors.get(params.sessionId);
       if (!pending || pending.expiresAt <= Date.now() || !actor || !actor.worker.isRunning || actor.generation !== pending.generation) {
         throw requestFailure("stale_ui_request", "the action request is no longer pending on this actor generation");
       }
       return { continuationOwner: pending, run: () => {
-        this.#extensionUiRequests.delete(key); clearTimeout(pending.timer);
+        this.#dialogRequests.delete(key); clearTimeout(pending.timer);
         if (pending.notificationId) this.#notifications.transition(pending.notificationId, params.cancelled ? "cancelled" : "resolved");
-        actor.worker.send({ type: "extension_ui_response", id: params.uiRequestId,
+        actor.worker.send({ type: "dialog_response", id: params.uiRequestId,
           ...(params.value !== undefined ? { value: params.value } : {}),
           ...(params.confirmed !== undefined ? { confirmed: params.confirmed } : {}),
           ...(params.cancelled !== undefined ? { cancelled: params.cancelled } : {}) });
@@ -2622,8 +2622,8 @@ export class HarnessSupervisor {
     } catch (error) { this.logger.error?.(`actor ${sessionId} event failed: ${error instanceof Error ? error.message : String(error)}`); }
     if (visibleRetained) {
       const subscribers = [...this.#clientConnections].filter((client) => client.subscriptions.has(sessionId));
-      const dialog = visibleRetained.type === "extension_ui_request" && ["select", "confirm", "input", "editor"].includes(visibleRetained.method);
-      const recipients = dialog && !this.#trackExtensionUiRequest(sessionId, record, visibleRetained) ? [] : dialog ? subscribers.slice(0, 1) : subscribers;
+      const dialog = visibleRetained.type === "dialog_request" && ["select", "confirm", "input", "editor"].includes(visibleRetained.method);
+      const recipients = dialog && !this.#trackDialogRequest(sessionId, record, visibleRetained) ? [] : dialog ? subscribers.slice(0, 1) : subscribers;
       this.#broadcast(recipients, event("actor_event", { sessionId, actorGeneration: record.generation, seq: record.eventSeq, event: visibleRetained }));
     }
     if (["agent_start", "agent_settled"].includes(frame?.type)) this.#broadcastNavigator(frame.type);
@@ -2636,7 +2636,7 @@ export class HarnessSupervisor {
     // unexpected-exit owner must publish before retirement removes its fence.
     if (lifecycle === "error") this.#publishActorInputFailure(sessionId, record);
     this.#actors.delete(sessionId); this.#clearPassivation(sessionId);
-    this.#clearExtensionUiRequests(sessionId, record.generation);
+    this.#clearDialogRequests(sessionId, record.generation);
     this.#rootOutput.failSession(sessionId, record.generation, record.expectedLifecycle ?? "actor_exit");
     this.store.markActorLifecycle(sessionId, record.generation, lifecycle, error, Date.now(), { reportChildExit: true }); if (error || lifecycle === "stopped") this.store.completeSubmittedChildTask?.(sessionId, error ?? "actor was explicitly stopped");
     this.#queueHistoryMaintenance(sessionId, { invalidate: true });
@@ -2882,39 +2882,39 @@ export class HarnessSupervisor {
     if (!this.#write(state, event("message_available", { message: { ...delivered, senderName: sender?.name, senderShortId: sender?.shortId, senderDepth: sender?.depth, relationship: receiverRelationship(delivered.relationship) }, deliverAs: "steer" }))) state.deliveryInFlight.delete(delivered.messageId);
   }
 
-  #trackExtensionUiRequest(sessionId, record, event) {
+  #trackDialogRequest(sessionId, record, event) {
     const requestId = event.id ?? event.requestId;
     if (typeof requestId !== "string" || !requestId || requestId.length > 128) return false;
     const key = `${sessionId}\0${requestId}`;
-    if (this.#extensionUiRequests.has(key) || this.#extensionUiRequests.size >= 256) return false;
+    if (this.#dialogRequests.has(key) || this.#dialogRequests.size >= 256) return false;
     const timeout = Number.isSafeInteger(event.timeout) ? Math.min(event.timeout, 600_000) : 600_000;
     const expiresAt = Date.now() + Math.max(0, timeout);
     const session = this.store.getSession(sessionId);
     const notification = session?.kind === "root" && session.depth === 0 ? this.#notifications.create({
       key: `dialog:${sessionId}:${record.generation}:${requestId}`, rootId: sessionId, sessionId, kind: "attention",
       title: event.title || "Decision needed", body: event.message || event.title || "A live interactive request needs your response.", expiresAt,
-      source: { type: "extension_ui", requestId, actorGeneration: record.generation } }) : null;
+      source: { type: "dialog", requestId, actorGeneration: record.generation } }) : null;
     const pending = { generation: record.generation, timer: null, event, expiresAt, notificationId: notification?.id };
     pending.timer = setTimeout(() => {
-      if (this.#extensionUiRequests.get(key) !== pending) return;
-      this.#extensionUiRequests.delete(key);
+      if (this.#dialogRequests.get(key) !== pending) return;
+      this.#dialogRequests.delete(key);
       this.#notifications.expire();
       const actor = this.#actors.get(sessionId);
       if (actor?.generation === pending.generation && actor.worker.isRunning) {
-        try { actor.worker.send({ type: "extension_ui_response", id: requestId, cancelled: true }); } catch {}
+        try { actor.worker.send({ type: "dialog_response", id: requestId, cancelled: true }); } catch {}
       }
     }, timeout);
-    pending.timer.unref(); this.#extensionUiRequests.set(key, pending); return true;
+    pending.timer.unref(); this.#dialogRequests.set(key, pending); return true;
   }
   #pendingUiRequests(sessionId) {
     const actor = this.#actors.get(sessionId); if (!actor?.worker.isRunning) return [];
-    return [...this.#extensionUiRequests.entries()].filter(([key, p]) => key.startsWith(`${sessionId}\0`) && p.generation === actor.generation && p.expiresAt > Date.now())
+    return [...this.#dialogRequests.entries()].filter(([key, p]) => key.startsWith(`${sessionId}\0`) && p.generation === actor.generation && p.expiresAt > Date.now())
       .map(([, p]) => ({ ...p.event, timeout: Math.max(0, p.expiresAt - Date.now()) }));
   }
-  #clearExtensionUiRequests(sessionId, generation) {
+  #clearDialogRequests(sessionId, generation) {
     const prefix = `${sessionId}\0`;
-    for (const [key, pending] of this.#extensionUiRequests) if (key.startsWith(prefix) && pending.generation === generation) {
-      clearTimeout(pending.timer); this.#extensionUiRequests.delete(key);
+    for (const [key, pending] of this.#dialogRequests) if (key.startsWith(prefix) && pending.generation === generation) {
+      clearTimeout(pending.timer); this.#dialogRequests.delete(key);
       if (pending.notificationId) this.#notifications.transition(pending.notificationId, "cancelled");
     }
   }
@@ -3056,7 +3056,7 @@ export class HarnessSupervisor {
       return { type, entryId: frame.entryId, taskId: frame.taskId, childId: frame.childId,
         childName: frame.childName, relationship: "child", body: frame.body, createdAt: createdAt.toISOString() };
     }
-    if (type === "extension_ui_request") {
+    if (type === "dialog_request") {
       const result = { type };
       for (const key of ["id", "requestId", "method", "title", "message", "placeholder", "prefill", "statusKey", "statusText", "notifyType"]) {
         if (typeof frame[key] === "string") result[key] = frame[key];

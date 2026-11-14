@@ -77,7 +77,7 @@ test("once Home is configured, only Home's family notifies the user", async t =>
   const request = { key: "need", title: "Decision", body: "Which one?", expiresIn: 10 };
   await assert.rejects(room.connection.request("request_attention", request), /only Home notifies the user/);
   room.busy(); room.idle();
-  room.emit("event", { type: "extension_ui_request", id: "room-dialog", method: "confirm", title: "Room decision", timeout: 120_000 });
+  room.emit("event", { type: "dialog_request", id: "room-dialog", method: "confirm", title: "Room decision", timeout: 120_000 });
   await delay(130); assert.deepEqual(await list(), [], "other rooms raise no idle or dialog notices");
   home.busy(); home.idle();
   const notices = await eventually(async () => { const items = await list(); return items.length && items; });
@@ -132,7 +132,7 @@ test("live tool execution is not idle; dialogs reach durable feed without SSE an
   const f = await fixture(t), root = await f.actor();
   root.busy(); root.emit("event", { type: "tool_execution_start", toolCallId: "live-tool", toolName: "ipython", args: {} }); root.idle();
   await delay(130); assert.equal((await f.client.request("list_notifications")).notifications.length, 0);
-  root.emit("event", { type: "extension_ui_request", id: "dialog-expiry", method: "confirm", title: "An exact decision", message: "Approve this?", timeout: 3000 });
+  root.emit("event", { type: "dialog_request", id: "dialog-expiry", method: "confirm", title: "An exact decision", message: "Approve this?", timeout: 3000 });
   const item = (await f.client.request("list_notifications")).notifications[0]; assert.equal(item.kind, "attention");
   const snapshot = await f.client.request("subscribe_session", { selector: root.session.sessionId, passive: true });
   assert.equal(snapshot.pendingUiRequests[0].id, "dialog-expiry"); assert.ok(snapshot.pendingUiRequests[0].timeout <= 3000);
@@ -140,11 +140,11 @@ test("live tool execution is not idle; dialogs reach durable feed without SSE an
   assert.equal((await f.client.request("get_notification", { id: item.id })).notification.state, "pending");
   await eventually(async () => (await f.client.request("get_notification", { id: item.id })).notification.state === "expired");
   await eventually(async () => (await f.client.request("subscribe_session", { selector: root.session.sessionId, passive: true })).pendingUiRequests.length === 0);
-  await assert.rejects(f.client.request("respond_extension_ui", { sessionId: root.session.sessionId, uiRequestId: "dialog-expiry", confirmed: true }), /no longer pending/);
+  await assert.rejects(f.client.request("respond_dialog", { sessionId: root.session.sessionId, uiRequestId: "dialog-expiry", confirmed: true }), /no longer pending/);
   assert.equal((await f.client.request("subscribe_session", { selector: root.session.sessionId, passive: true })).pendingUiRequests.length, 0);
-  root.emit("event", { type: "extension_ui_request", id: "dialog-cancel", method: "input", title: "Choose a value", timeout: 120_000 });
+  root.emit("event", { type: "dialog_request", id: "dialog-cancel", method: "input", title: "Choose a value", timeout: 120_000 });
   const cancel = (await f.client.request("list_notifications")).notifications[0];
-  await f.client.request("respond_extension_ui", { sessionId: root.session.sessionId, uiRequestId: "dialog-cancel", cancelled: true });
+  await f.client.request("respond_dialog", { sessionId: root.session.sessionId, uiRequestId: "dialog-cancel", cancelled: true });
   assert.equal((await f.client.request("get_notification", { id: cancel.id })).notification.state, "cancelled");
   root.emit("event", { type: "tool_execution_end", toolCallId: "live-tool", toolName: "ipython", result: { content: [] } });
   await eventually(async () => (await f.client.request("list_notifications")).notifications.some(n => n.kind === "idle"));

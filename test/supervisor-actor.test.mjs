@@ -166,7 +166,7 @@ test("request-id replay protection stays bounded across long-lived protocol conn
   t.after(() => inFlight.destroy()); await once(inFlight, "connect");
   inFlight.write(encodeFrame(frame("register-in-flight", "register_client", { clientInstanceId: "request-id-in-flight" })));
   await eventually(() => inFlightFrames.some((item) => item.id === "register-in-flight" && item.ok));
-  const duplicateInFlight = frame("in-flight-id", "respond_extension_ui", { sessionId: "request-id-root", uiRequestId: "dialog", cancelled: true });
+  const duplicateInFlight = frame("in-flight-id", "respond_dialog", { sessionId: "request-id-root", uiRequestId: "dialog", cancelled: true });
   inFlight.write(Buffer.concat([encodeFrame(duplicateInFlight), encodeFrame(duplicateInFlight),
     encodeFrame(frame("cancelled-after-in-flight", "heartbeat", {}))]));
   await eventually(() => inFlightFrames.some((item) => item.type === "protocol_error" && item.code === "duplicate_request_id") && inFlightClosed);
@@ -1956,7 +1956,7 @@ test("full and source-aware worker end events retain the same type-only live and
   assert(Buffer.byteLength(JSON.stringify(fitting.events)) < 40 * 1024);
 
   actor.emit("event", { type: "agent_start" });
-  const notices = Array.from({ length: 3 }, (_, index) => ({ type: "extension_ui_request", method: "notify",
+  const notices = Array.from({ length: 3 }, (_, index) => ({ type: "dialog_request", method: "notify",
     id: `notice-${index}`, statusText: `${index}:"\\\næ¼¢ðŸ˜€\ud800${"x".repeat(19_900)}` }));
   for (const notice of notices) actor.emit("event", notice);
   const accepted = await client.request("submit_input", { sessionId, message: "å¾…æ©Ÿ ðŸ˜€\n\"", behavior: "auto" });

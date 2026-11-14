@@ -8,7 +8,7 @@ const MAX_PENDING_REQUESTS = 128;
 const errorText = (error) => error instanceof Error ? error.message : String(error);
 
 /** Dialogs stay on the RPC connection; the supervisor shows them and sends the answer back. */
-export class RpcDialogBroker {
+export class DialogBroker {
   #pending = new Map();
   #closed = false;
   constructor(publish, { maxPending = 128, onChange = () => {} } = {}) {
@@ -16,7 +16,7 @@ export class RpcDialogBroker {
     this.maxPending = maxPending;
     this.onChange = onChange;
     const send = (method, fields) => {
-      if (!this.#closed) this.publish({ type: "extension_ui_request", id: randomUUID(), method, ...fields });
+      if (!this.#closed) this.publish({ type: "dialog_request", id: randomUUID(), method, ...fields });
     };
     this.ui = {
       select: (title, options, opts) => this.dialog("select", { title, options }, opts),
@@ -50,7 +50,7 @@ export class RpcDialogBroker {
       this.#pending.set(id, { method, finish, cancel });
       opts.signal?.addEventListener("abort", cancel, { once: true });
       if (opts.timeout > 0) timer = setTimeout(cancel, opts.timeout);
-      try { this.publish({ type: "extension_ui_request", id, method, ...fields, timeout: opts.timeout }); }
+      try { this.publish({ type: "dialog_request", id, method, ...fields, timeout: opts.timeout }); }
       catch (error) { if (cleanup()) reject(error); }
     });
   }
@@ -93,7 +93,7 @@ export async function runWorkerRpc({ input = process.stdin, output = process.std
     }
     output.write(line);
   };
-  const broker = new RpcDialogBroker(publish, { onChange: () => { void drainShutdown(); } });
+  const broker = new DialogBroker(publish, { onChange: () => { void drainShutdown(); } });
   const lifecycle = { requestShutdown: () => { shutdownRequested = true; queueMicrotask(() => { void drainShutdown(); }); } };
   async function drainShutdown() {
     if (!shutdownRequested || closing || drainingShutdown || pending.size || broker.pendingCount) return;
@@ -132,7 +132,7 @@ export async function runWorkerRpc({ input = process.stdin, output = process.std
     try { commands = decoder.push(chunk); }
     catch (error) { respondError(null, error); void close(error); return; }
     for (const command of commands) {
-      if (command?.type === "extension_ui_response") { broker.respond(command); continue; }
+      if (command?.type === "dialog_response") { broker.respond(command); continue; }
       if (shutdownRequested) { respondError(command, new Error("Actor shutdown requested")); continue; }
       if (pending.size >= MAX_PENDING_REQUESTS) { respondError(command, new Error("Too many pending actor RPC requests")); continue; }
       if (command?.id != null && (typeof command.id !== "string" || activeIds.has(command.id))) {

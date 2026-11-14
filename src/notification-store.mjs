@@ -61,6 +61,9 @@ export class NotificationStore {
         code TEXT, accepted_at INTEGER, PRIMARY KEY(notification_id, endpoint_id)
       ) STRICT;
     `);
+    // Dialog notifications were once recorded under pi's name for them.
+    this.#db.prepare(`UPDATE notifications SET source_json=json_set(source_json,'$.type','dialog')
+      WHERE json_extract(source_json,'$.type')='extension_ui'`).run();
     if (!this.#db.prepare("PRAGMA table_info(notification_families)").all().some(column => column.name === "pending_owner")) {
       this.#db.exec("ALTER TABLE notification_families ADD COLUMN pending_owner TEXT");
     }
@@ -246,7 +249,7 @@ export class NotificationStore {
   cancelDialogs(now = Date.now()) {
     // Restart cannot revive a generation-bound interactive approval.
     this.#db.prepare(`UPDATE notifications SET state='cancelled',updated_at=? WHERE state='pending'
-      AND json_extract(source_json,'$.type')='extension_ui'`).run(now);
+      AND json_extract(source_json,'$.type')='dialog'`).run(now);
   }
   claim(endpoints, now = Date.now()) {
     return this.#transaction(() => {

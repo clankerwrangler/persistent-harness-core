@@ -48,11 +48,11 @@ class TransportActor extends EventEmitter {
   async submit(message, behavior, images = []) { this.submits.push({ message, behavior, images }); return {}; }
   showCallback(id) {
     assert(this.pendingCallbacks.has(id));
-    this.emit("event", { type: "extension_ui_request", id, method: "confirm", title: "Synthetic transport callback",
+    this.emit("event", { type: "dialog_request", id, method: "confirm", title: "Synthetic transport callback",
       message: "Private fixture only", timeout: 120_000 });
   }
   send(frame) {
-    if (frame?.type !== "extension_ui_response") return;
+    if (frame?.type !== "dialog_response") return;
     const gate = this.pendingCallbacks.get(frame.id); if (!gate) return;
     this.pendingCallbacks.delete(frame.id); this.receivedCallbacks.push(frame); gate.resolve(frame);
   }
@@ -214,9 +214,9 @@ test("bounded admission cannot obstruct the legal callback needed by one executi
   t.after(async () => { net.Socket.prototype.write = write; await Promise.allSettled(requests); });
   client.on("disconnected", () => disconnected++);
   client.on("event", frame => {
-    if (frame.event !== "actor_event" || frame.data?.event?.type !== "extension_ui_request") return;
+    if (frame.event !== "actor_event" || frame.data?.event?.type !== "dialog_request") return;
     const id = frame.data.event.id;
-    const promise = client.request("respond_extension_ui", { sessionId: f.a.sessionId, uiRequestId: id, confirmed: true });
+    const promise = client.request("respond_dialog", { sessionId: f.a.sessionId, uiRequestId: id, confirmed: true });
     promise.catch(() => {}); callbacks.set(id, promise); requests.push(promise);
   });
   await client.request("subscribe_session", { selector: f.a.sessionId }); assert(server);
@@ -292,7 +292,7 @@ test("identical broadcasts encode once and retain public subscriptions, generati
   const seen = [[], [], []];
   [one, two, outsider].forEach((client, i) => client.on("event", frame => seen[i].push(frame)));
   const observed = observeBroadcasts(t), actor = f.actors.get(f.a.sessionId);
-  actor.emit("event", { type: "extension_ui_request", method: "notify", id: "shared-notice", message: "Synthetic shared notice" });
+  actor.emit("event", { type: "dialog_request", method: "notify", id: "shared-notice", message: "Synthetic shared notice" });
   await one.request("rename_session", { sessionId: f.a.sessionId, name: "Shared navigator" });
   const submit = actor.submit.bind(actor);
   actor.submit = async (...args) => { await submit(...args); return { outcome: "handled" }; };
@@ -316,7 +316,7 @@ test("identical broadcasts encode once and retain public subscriptions, generati
   await one.request("unsubscribe_session", { sessionId: f.a.sessionId });
   await two.request("unsubscribe_session", { sessionId: f.a.sessionId });
   const before = observed.encodes.length;
-  f.actors.get(f.a.sessionId).emit("event", { type: "extension_ui_request", method: "notify", id: "unselected-notice", message: "No subscriber" });
+  f.actors.get(f.a.sessionId).emit("event", { type: "dialog_request", method: "notify", id: "unselected-notice", message: "No subscriber" });
   assert.equal(observed.encodes.length, before, "an unselected actor event does no encoding");
   t.diagnostic(JSON.stringify({ broadcastEncodes: { actor: 1, navigator: 1, inputState: 1, inputOutcome: 1 }, actorRecipients: 2, navigatorRecipients: 3 }));
 });
@@ -333,11 +333,11 @@ test("dialogs do not retarget closing, ended, or destroyed selected sockets", { 
     const server = observed.writes.find(({ frame }) => frame.type === "response" && frame.id === "subscribe-first").socket;
     await two.request("subscribe_session", { selector: f.a.sessionId });
     const actor = f.actors.get(f.a.sessionId);
-    actor.emit("event", { type: "extension_ui_request", method: "confirm", id: "selected-dialog", message: "Select once", timeout: 120_000 });
-    await eventually(() => actorFrames(first.frames, "extension_ui_request").length === 1, "selected dialog");
+    actor.emit("event", { type: "dialog_request", method: "confirm", id: "selected-dialog", message: "Select once", timeout: 120_000 });
+    await eventually(() => actorFrames(first.frames, "dialog_request").length === 1, "selected dialog");
     assertShared(observed, frame => frame.event === "actor_event" && frame.data.event.id === "selected-dialog", 1);
-    assert.equal(actorFrames(seen, "extension_ui_request").length, 0);
-    first.send("respond-first", "respond_extension_ui", { sessionId: f.a.sessionId, uiRequestId: "selected-dialog", confirmed: true });
+    assert.equal(actorFrames(seen, "dialog_request").length, 0);
+    first.send("respond-first", "respond_dialog", { sessionId: f.a.sessionId, uiRequestId: "selected-dialog", confirmed: true });
     await eventually(() => first.frames.some(frame => frame.id === "respond-first" && frame.data?.delivered), "selected response");
     const write = net.Socket.prototype.write; let closeCallback;
     try {
@@ -355,9 +355,9 @@ test("dialogs do not retarget closing, ended, or destroyed selected sockets", { 
       else { server.destroy(); assert.equal(server.destroyed, true); }
       // Selection precedes #write eligibility, even before close cleanup removes the subscription.
       const before = observed.encodes.length;
-      actor.emit("event", { type: "extension_ui_request", method: "confirm", id: "ineligible-dialog", message: "Do not retarget", timeout: 120_000 });
+      actor.emit("event", { type: "dialog_request", method: "confirm", id: "ineligible-dialog", message: "Do not retarget", timeout: 120_000 });
       assert.equal(observed.encodes.length, before, "no eligible selected recipient means no encoding");
-      actor.emit("event", { type: "extension_ui_request", method: "notify", id: "eligible-peer", message: "Still shared" });
+      actor.emit("event", { type: "dialog_request", method: "notify", id: "eligible-peer", message: "Still shared" });
       await eventually(() => seen.some(frame => frame.data?.event?.id === "eligible-peer"), "eligible peer delivery");
       assert.equal(seen.some(frame => frame.data?.event?.id === "ineligible-dialog"), false);
       assertShared(observed, frame => frame.event === "actor_event" && frame.data.event.id === "eligible-peer", 1);
@@ -370,7 +370,7 @@ test("ordinary oversized broadcasts share the existing fallback and encoding fai
   await one.request("subscribe_session", { selector: f.a.sessionId }); await two.request("subscribe_session", { selector: f.a.sessionId });
   const observed = observeBroadcasts(t), actor = f.actors.get(f.a.sessionId), seen = [[], []];
   [one, two].forEach((client, i) => client.on("event", frame => seen[i].push(frame)));
-  actor.emit("event", { type: "extension_ui_request", method: "notify", id: "oversized-notice", message: "x".repeat(6000) });
+  actor.emit("event", { type: "dialog_request", method: "notify", id: "oversized-notice", message: "x".repeat(6000) });
   await eventually(() => seen.every(frames => frames.some(frame => frame.event === "frame_truncated")), "ordinary fallback delivery");
   assert.equal(observed.encodes.filter(({ frame }) => frame.data?.event?.id === "oversized-notice").length, 1, "the oversized source frame is tried once");
   assertShared(observed, frame => frame.event === "frame_truncated", 2);
@@ -383,7 +383,7 @@ test("ordinary oversized broadcasts share the existing fallback and encoding fai
     if (value?.type === "event" && value.data?.event?.id === "failed-encoding") { failedEncodes++; throw new Error("synthetic encoder failure"); }
     return stringify.call(this, value, ...args);
   };
-  try { actor.emit("event", { type: "extension_ui_request", method: "notify", id: "failed-encoding", message: "Fail eligible recipients" }); }
+  try { actor.emit("event", { type: "dialog_request", method: "notify", id: "failed-encoding", message: "Fail eligible recipients" }); }
   finally { JSON.stringify = stringify; }
   assert.equal(failedEncodes, 1, "a failed encoding is not retried for each selected recipient");
   assert(recipientSockets.every(socket => socket.destroyed), "encoding failure closes each selected recipient");
@@ -403,15 +403,15 @@ test("shared broadcast queues drain immutable bytes in order and bound only the 
   const actor = f.actors.get(f.a.sessionId), seen = [];
   healthy.on("event", frame => seen.push(frame));
   const send = index => {
-    const source = { type: "extension_ui_request", method: "notify", id: `immutable-${index}`, message: `${index}:` + "x".repeat(20000) };
+    const source = { type: "dialog_request", method: "notify", id: `immutable-${index}`, message: `${index}:` + "x".repeat(20000) };
     actor.emit("event", source); source.message = "mutated after synchronous broadcast";
   };
   slow.socket.pause(); for (let i = 0; i < 6; i++) send(i);
-  await eventually(() => actorFrames(seen, "extension_ui_request").length === 6, "healthy delivery while peer paused");
+  await eventually(() => actorFrames(seen, "dialog_request").length === 6, "healthy delivery while peer paused");
   assert.equal(server.destroyed, false); slow.socket.resume();
-  await eventually(() => actorFrames(slow.frames, "extension_ui_request").length === 6, "slow drain retains queued frames");
-  assert.deepEqual(actorFrames(slow.frames, "extension_ui_request"), actorFrames(seen, "extension_ui_request"));
-  actorFrames(slow.frames, "extension_ui_request").forEach((frame, i) => {
+  await eventually(() => actorFrames(slow.frames, "dialog_request").length === 6, "slow drain retains queued frames");
+  assert.deepEqual(actorFrames(slow.frames, "dialog_request"), actorFrames(seen, "dialog_request"));
+  actorFrames(slow.frames, "dialog_request").forEach((frame, i) => {
     assert.equal(frame.data.event.message, `${i}:` + "x".repeat(20000), "post-broadcast source mutation cannot change queued wire bytes");
   });
   for (let i = 0; i < 6; i++) assertShared(observed, frame => frame.data?.event?.id === `immutable-${i}`, 2);
@@ -421,9 +421,9 @@ test("shared broadcast queues drain immutable bytes in order and bound only the 
     if (sent % 4 === 0) assert.equal((await healthy.request("heartbeat")).alive, true);
   }
   await eventually(() => server.destroyed, "only stalled broadcast recipient reaches its logical byte bound");
-  await eventually(() => actorFrames(seen, "extension_ui_request").length === sent, "healthy peer retains every source event");
+  await eventually(() => actorFrames(seen, "dialog_request").length === sent, "healthy peer retains every source event");
   slow.socket.resume(); await eventually(() => slow.closed(), "stalled client observes its close");
-  const ids = actorFrames(seen, "extension_ui_request").map(frame => frame.data.event.id);
+  const ids = actorFrames(seen, "dialog_request").map(frame => frame.data.event.id);
   assert.deepEqual(ids, Array.from({ length: sent }, (_, i) => `immutable-${i}`));
   const slowWrites = observed.writes.filter(item => item.socket === server);
   assert(slowWrites.some(item => !item.ok), "real writes produce backpressure");

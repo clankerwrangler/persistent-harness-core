@@ -17,7 +17,7 @@ test("protocol separates one authenticated actor from detachable clients", () =>
   assert.equal(input.params.behavior, "follow_up"); assert.equal(input.params.clientRequestId, "browser-1");
   const imageInput = validateRequest(frame("submit_input", { sessionId: "actor", message: "", images: [{ type: "image", mimeType: "image/png", data: PNG_1X1 }] }));
   assert.equal(imageInput.params.images[0].mimeType, "image/png");
-  const ui = validateRequest(frame("respond_extension_ui", { sessionId: "actor", uiRequestId: "dialog", confirmed: true }));
+  const ui = validateRequest(frame("respond_dialog", { sessionId: "actor", uiRequestId: "dialog", confirmed: true }));
   assert.equal(ui.params.confirmed, true);
   const rename = validateRequest(frame("rename_session", { sessionId: "actor", name: "new name" }));
   assert.equal(rename.params.name, "new name");
@@ -138,9 +138,9 @@ test("operator actions are session-scoped and runtime approval is fingerprint-bo
 });
 
 test("extension UI responses allow exact empty input without permitting extra fields", () => {
-  assert.equal(validateRequest(frame("respond_extension_ui", { sessionId: "session-a", uiRequestId: "request-a", value: "" })).params.value, "");
-  assert.throws(() => validateRequest(frame("respond_extension_ui", { sessionId: "session-a", uiRequestId: "request-a", value: "", extra: true })), /not supported/);
-  assert.throws(() => validateRequest(frame("respond_extension_ui", { sessionId: "session-a", uiRequestId: "request-a", value: "x".repeat(32 * 1024 + 1) })), /32768 UTF-8 bytes/);
+  assert.equal(validateRequest(frame("respond_dialog", { sessionId: "session-a", uiRequestId: "request-a", value: "" })).params.value, "");
+  assert.throws(() => validateRequest(frame("respond_dialog", { sessionId: "session-a", uiRequestId: "request-a", value: "", extra: true })), /not supported/);
+  assert.throws(() => validateRequest(frame("respond_dialog", { sessionId: "session-a", uiRequestId: "request-a", value: "x".repeat(32 * 1024 + 1) })), /32768 UTF-8 bytes/);
 });
 
 

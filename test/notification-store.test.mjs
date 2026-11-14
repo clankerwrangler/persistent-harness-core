@@ -233,7 +233,7 @@ test("inbox and history partition canonical kinds before bounded pagination with
   for (const kind of ["idle", "cron", "attention"]) for (const state of ["pending", "resolved", "cancelled", "superseded", "expired"]) for (const read of [false, true]) {
     const item = store.create({ key: `${kind}:${state}:${read}`, rootId: "root", sessionId: "root", kind,
       title: "Type, not prose", body: "This text does not classify the request", expiresAt: state === "expired" ? 4000 : 100000,
-      source: { type: kind === "attention" ? "extension_ui" : kind === "idle" ? "family_idle" : "cron" } }, 3000);
+      source: { type: kind === "attention" ? "dialog" : kind === "idle" ? "family_idle" : "cron" } }, 3000);
     if (["resolved", "cancelled", "superseded"].includes(state)) store.transition(item.id, state, 3001);
     if (read) store.read(item.id, 3002);
     if (state === "pending" && (!read || kind === "attention")) expectedInbox.push(item.id);
@@ -264,3 +264,18 @@ test("inbox and history partition canonical kinds before bounded pagination with
   for (const view of [null, "", "active", "INBOX", 1, {}, []]) assert.throws(() => store.list({ view }, now), /view/);
 });
 
+
+
+test("a dialog recorded under the old source name is renamed when the store opens, and cancelled as a dialog", async t => {
+  const { file, store } = await fixture(t);
+  const old = store.create({ key: "dialog:root:1:old", rootId: "root", sessionId: "root", kind: "attention", title: "Decision needed",
+    body: "Install?", expiresAt: 100000, source: { type: "extension_ui", requestId: "old", actorGeneration: 1 } }, 1000);
+  const reopened = new NotificationStore(file, { idleMs: 100 });
+  t.after(() => reopened.close());
+  const db = new DatabaseSync(file);
+  t.after(() => db.close());
+  const type = () => db.prepare("SELECT json_extract(source_json,'$.type') AS type FROM notifications WHERE id=?").get(old.id).type;
+  assert.equal(type(), "dialog");
+  reopened.cancelDialogs(2000);
+  assert.equal(db.prepare("SELECT state FROM notifications WHERE id=?").get(old.id).state, "cancelled");
+});
