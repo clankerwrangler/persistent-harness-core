@@ -20,6 +20,7 @@ export function sessionSidecarPaths(sessionFile) {
     capabilitiesPath: `${basePath}.capabilities.json`,
     skillGrantPath: `${basePath}.skill-grant.json`,
     kernelStatePath: `${basePath}.kernel-state`,
+    pythonStepsPath: `${basePath}.python-steps.json`,
   });
 }
 

@@ -1862,7 +1862,7 @@ export class HarnessSupervisor {
       };
     } catch (error) { await this.#removeUnadmittedSession(initialized.sessionFile); throw error; }
   }
-  async #removeUnadmittedSession(sessionFile) { const paths = sessionSidecarPaths(sessionFile); await Promise.all([this.coreSessions.remove(sessionFile), rm(paths.skillManifestPath, { force: true }), rm(paths.capabilitiesPath, { force: true }), rm(paths.skillGrantPath, { force: true }), rm(paths.kernelStatePath, { recursive: true, force: true })]); }
+  async #removeUnadmittedSession(sessionFile) { const paths = sessionSidecarPaths(sessionFile); await Promise.all([this.coreSessions.remove(sessionFile), rm(paths.skillManifestPath, { force: true }), rm(paths.capabilitiesPath, { force: true }), rm(paths.skillGrantPath, { force: true }), rm(paths.kernelStatePath, { recursive: true, force: true }), rm(paths.pythonStepsPath, { force: true })]); }
 
   async #discoverSkillRuntimePlan() {
     const catalog = await discoverSkillsFromDirectory(this.skillsPath);
