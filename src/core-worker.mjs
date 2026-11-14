@@ -27,9 +27,8 @@ import { nodeMemoryDiagnostics } from "./memory-diagnostics.mjs";
 import { actorInputCustomPayload } from "./protocol.mjs";
 import { TURN_FAILURE_ACCEPTED_TYPE, TURN_FAILURE_ENTRY_TYPE, TurnFailureReporter } from "./child-turn-failure.mjs";
 import { inputIdForEntry } from "./conversation-projection.mjs";
-import { fastModeOptions, supportsFastMode } from "./fast-mode.mjs";
+import { fastModeOptions, supportsFastMode, withCapabilities } from "./model-capabilities.mjs";
 import { MessageClock } from "./message-time.mjs";
-import { readDefaultInference } from "./default-inference.mjs";
 import { locationBlock } from "./input-location.mjs";
 import {
   INCOMING_MESSAGE_TYPE, KERNEL_SCRIPT, PYTHON_RUNTIME_SUPPORT, USAGE_ENTRY_TYPE, actorSkillGrant, applyActorSkillGrant,
@@ -57,6 +56,9 @@ export function parseCoreWorkerArgs(argv) {
       case "--provider": take("provider"); break;
       case "--model": take("model"); break;
       case "--thinking": take("thinking"); break;
+      case "--default-provider": take("defaultProvider"); break;
+      case "--default-model": take("defaultModel"); break;
+      case "--default-thinking": take("defaultThinking"); break;
       case "--name": take("name"); break;
       default: throw new Error(`Unknown core worker flag: ${flag}`);
     }
@@ -149,16 +151,13 @@ export class CoreWorker {
     if (options.thinking) await this.core.setModel({ reasoning: options.thinking });
     // The core keeps the current choice; asking with no change reads it.
     let current = await this.core.setModel({});
-    // A session that names no model starts on the settings' default, as pi did. Model and
+    // A session that names no model starts on the default the supervisor passed. Model and
     // thinking level are set in one call, so an interruption cannot keep one without the
     // other; the core keeps them, so later starts read them back.
-    if (!current.model) {
-      const fallback = readDefaultInference(path.join(this.agentDir, "settings.json"));
-      if (fallback) {
-        const reasoning = current.reasoning ?? fallback.thinkingLevel;
-        await this.core.setModel({ provider: fallback.provider, model: fallback.model, ...(reasoning ? { reasoning } : {}) });
-        current = await this.core.setModel({});
-      }
+    if (!current.model && options.defaultProvider && options.defaultModel) {
+      const reasoning = current.reasoning ?? options.defaultThinking;
+      await this.core.setModel({ provider: options.defaultProvider, model: options.defaultModel, ...(reasoning ? { reasoning } : {}) });
+      current = await this.core.setModel({});
     }
     this.selected = { model: current.model ?? null, reasoning: current.reasoning ?? null };
     await this.#refreshModels();
@@ -250,7 +249,7 @@ export class CoreWorker {
       }
       case "get_available_models": {
         if (command.refresh !== false) await this.#refreshModels();
-        return { models: this.models };
+        return { models: this.models.map(withCapabilities) };
       }
       case "select_inference": {
         const model = this.models.find((m) => m.provider === command.provider && m.id === command.model);
@@ -279,7 +278,7 @@ export class CoreWorker {
   #state() {
     const model = this.model;
     return { sessionId: this.sessionId, sessionFile: this.options.sessionDir, sessionName: this.options.name ?? null,
-      model: model ? { ...model } : null, thinkingLevel: this.selected.reasoning ?? "off",
+      model: model ? withCapabilities(model) : null, thinkingLevel: this.selected.reasoning ?? "off",
       isStreaming: this.core.busy, pendingMessageCount: this.followUps.length, channelVersion: SESSION_CHANNEL_VERSION };
   }
 

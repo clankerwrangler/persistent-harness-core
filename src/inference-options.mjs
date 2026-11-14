@@ -1,6 +1,3 @@
-import { supportedThinkingLevels } from "./child-policy.mjs";
-
-import { supportsFastMode } from "./fast-mode.mjs";
 
 const MAX_MODELS = 512;
 const MAX_PROVIDER_LENGTH = 128;
@@ -46,8 +43,14 @@ function projectModel(model, index) {
     throw new Error(`${context}.contextWindow must be a positive integer of at most ${MAX_CONTEXT_WINDOW}`);
   }
   validateThinkingLevelMap(model, context);
-  const thinkingLevels = supportedThinkingLevels(model);
-  return { provider, id, name, reasoning: model.reasoning, thinkingLevels, contextWindow: model.contextWindow, fastModeSupported: supportsFastMode(model) };
+  // What the model can do comes from the session process, which reads the core's model list.
+  const levels = model.thinkingLevels;
+  if (!Array.isArray(levels) || levels.length === 0 || new Set(levels).size !== levels.length || levels.some((level) => !EFFORTS.has(level))) {
+    throw new Error(`${context}.thinkingLevels must be distinct supported levels`);
+  }
+  if (!model.reasoning && (levels.length !== 1 || levels[0] !== "off")) throw new Error(`${context} without reasoning must support only off`);
+  if (typeof model.fastModeSupported !== "boolean") throw new Error(`${context}.fastModeSupported must be boolean`);
+  return { provider, id, name, reasoning: model.reasoning, thinkingLevels: [...levels], contextWindow: model.contextWindow, fastModeSupported: model.fastModeSupported };
 }
 
 /**

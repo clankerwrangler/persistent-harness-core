@@ -27,7 +27,7 @@ test("prompt preflight can outlive the actor startup and control timeout", { tim
     const reply = (request, data) => process.stdout.write(JSON.stringify({ type: "response", id: request.id, success: true, data }) + "\n");
     lines.on("line", (line) => {
       const request = JSON.parse(line);
-      if (request.type === "get_state") reply(request, { sessionId: "delayed-preflight", isStreaming: false, channelVersion: 2 });
+      if (request.type === "get_state") reply(request, { sessionId: "delayed-preflight", isStreaming: false, channelVersion: 3 });
       else if (request.type === "prompt") setTimeout(() => reply(request, { accepted: true }), 750);
       else if (request.type === "slow_control") setTimeout(() => reply(request, { completed: true }), 750);
       else reply(request, {});
@@ -60,7 +60,7 @@ function startupFixture(t, fixture, options = {}) {
         handle: async (command) => {
           if (command.type === "get_state") {
             if (states++ > 0) await delay(fixture.warmMs ?? 0);
-            return { sessionId: "startup", sessionFile: null, model: null, thinkingLevel: "off", channelVersion: 2 };
+            return { sessionId: "startup", sessionFile: null, model: null, thinkingLevel: "off", channelVersion: 3 };
           }
           throw new Error("fixture refuses non-control operation");
         },
@@ -158,7 +158,7 @@ async function shutdownFixture(t, { hang = false } = {}) {
     readline.createInterface({ input: process.stdin }).on("line", (line) => {
       const request = JSON.parse(line);
       process.stdout.write(JSON.stringify({ type: "response", id: request.id, success: true,
-        data: request.type === "get_state" ? { sessionId: "shutdown", isStreaming: false, channelVersion: 2 } : {} }) + "\n");
+        data: request.type === "get_state" ? { sessionId: "shutdown", isStreaming: false, channelVersion: 3 } : {} }) + "\n");
     });
     await once(child.stdout, "data");
     await writeFile("child-pid", String(child.pid));
@@ -241,7 +241,7 @@ test("stderr keeps its bounded UTF-8 prefix through tails and terminal errors", 
     readline.createInterface({ input: process.stdin }).on("line", (request) => {
       const r = JSON.parse(request);
       const reply = (data) => process.stdout.write(JSON.stringify({ type: "response", id: r.id, success: true, data }) + "\n");
-      if (r.type === "get_state") reply({ sessionId: "stderr", isStreaming: false, channelVersion: 2 });
+      if (r.type === "get_state") reply({ sessionId: "stderr", isStreaming: false, channelVersion: 3 });
       else if (r.type === "emit") process.stderr.write(r.text, () => reply({}));
       else if (r.type === "finish") process.exit(7);
       else if (r.type !== "wait") reply({});

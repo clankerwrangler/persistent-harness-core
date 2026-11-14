@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findModels, resolveChildLaunchPolicy } from "../src/child-policy.mjs";
+import { resolveChildLaunchPolicy } from "../src/child-policy.mjs";
+import { findModels } from "../src/model-capabilities.mjs";
 
 const availableModels = [
   { provider: "fake-a", id: "shared", name: "Shared A", reasoning: true, thinkingLevels: ["off", "minimal", "low", "medium", "high"] },

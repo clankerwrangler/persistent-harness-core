@@ -5,7 +5,7 @@ import { StringDecoder } from "node:string_decoder";
 import { constants as fsConstants, readFileSync } from "node:fs";
 import { link, lstat, mkdir, open, readFile, readdir, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
-import { findModels, supportedThinkingLevels } from "./child-policy.mjs";
+import { findModels, supportedThinkingLevels } from "./model-capabilities.mjs";
 import { readRecentEvents } from "./event-log-reader.mjs";
 import { preferAsOomVictim } from "./oom-victim.mjs";
 

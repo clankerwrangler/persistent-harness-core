@@ -1,16 +1,6 @@
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const CHILD_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
-export function supportedThinkingLevels(model) {
-  if (!model?.reasoning) return ["off"];
-  return [...THINKING_LEVELS].filter((level) => {
-    const mapped = model.thinkingLevelMap?.[level];
-    if (mapped === null) return false;
-    if (level === "xhigh" || level === "max") return mapped !== undefined;
-    return true;
-  });
-}
-
 function requireModel(model, context) {
   if (!model || typeof model !== "object" || Array.isArray(model)) throw new Error(`${context} is required`);
   if (typeof model.provider !== "string" || !model.provider || model.provider.length > 128) {
@@ -161,44 +151,6 @@ export function resolveChildLaunchPolicy({
     skillCatalog,
     capabilities,
   };
-}
-
-function preferredEntries(preferred) {
-  const values = Array.isArray(preferred) ? preferred : preferred == null ? [] : [preferred];
-  const entries = [];
-  const seen = new Set();
-  for (const value of values) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-    if (typeof value.provider !== "string" || typeof value.id !== "string") continue;
-    const key = `${value.provider}\0${value.id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    entries.push({ provider: value.provider, id: value.id });
-  }
-  return entries;
-}
-
-function preferredIndex(filtered, preferred) {
-  const exact = filtered.findIndex((model) => model.provider === preferred.provider && model.id === preferred.id);
-  if (exact >= 0) return exact;
-  const idMatches = filtered.reduce((count, model) => count + (model.id === preferred.id ? 1 : 0), 0);
-  if (idMatches === 1) return filtered.findIndex((model) => model.id === preferred.id);
-  return -1;
-}
-
-export function findModels(models, query = "", limit = 50, preferred = null) {
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("limit must be an integer from 1 through 100");
-  const needle = String(query ?? "").trim().toLowerCase();
-  const filtered = normalizeModels(models)
-    .filter((model) => !needle || `${model.provider}/${model.id} ${model.name}`.toLowerCase().includes(needle));
-  for (const entry of preferredEntries(preferred).reverse()) {
-    const index = preferredIndex(filtered, entry);
-    if (index > 0) {
-      const [preferredModel] = filtered.splice(index, 1);
-      filtered.unshift(preferredModel);
-    }
-  }
-  return filtered.slice(0, limit);
 }
 
 export const childPolicyInternals = { CHILD_NAME, THINKING_LEVELS, normalizeSkillCatalog, resolveExactModel };

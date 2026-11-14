@@ -1,5 +1,4 @@
 import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { supportedThinkingLevels } from "./child-policy.mjs";
 
 const EFFORT_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -31,7 +30,7 @@ export function resolveDefaultTarget(target, models, defaultProvider) {
 // A session keeps its thinking level unless the target lacks it, then takes the
 // nearest supported level, preferring lower.
 export function closestThinkingLevel(level, model) {
-  const supported = supportedThinkingLevels(model);
+  const supported = Array.isArray(model?.thinkingLevels) ? model.thinkingLevels : ["off"];
   if (supported.includes(level)) return level;
   const start = EFFORT_ORDER.indexOf(level);
   for (let index = start; index >= 0; index -= 1) if (supported.includes(EFFORT_ORDER[index])) return EFFORT_ORDER[index];

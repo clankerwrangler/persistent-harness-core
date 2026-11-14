@@ -5,7 +5,7 @@
 // and new halves could misread raises SESSION_CHANNEL_VERSION.
 import { JsonLineDecoder } from "./framing.mjs";
 
-export const SESSION_CHANNEL_VERSION = 2;
+export const SESSION_CHANNEL_VERSION = 3;
 /** One line can carry a large tool result. */
 export const MAX_SESSION_LINE_BYTES = 256 * 1024 * 1024;
 /** Environment variable naming the session process's code cache directory, if any. */

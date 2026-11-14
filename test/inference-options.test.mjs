@@ -5,9 +5,11 @@ import {
   resolveModelSelection,
   validateInferenceEffort,
 } from "../src/inference-options.mjs";
+import { withCapabilities } from "../src/model-capabilities.mjs";
 
+// A model as the session process reports it: the core's description and what it can do.
 function rawModel(overrides = {}) {
-  return {
+  return withCapabilities({
     provider: "provider-a",
     id: "model-a",
     name: "Model A",
@@ -19,7 +21,7 @@ function rawModel(overrides = {}) {
     baseUrl: "https://private.invalid/secret",
     cost: { secretRate: 42 },
     ...overrides,
-  };
+  });
 }
 
 test("projects only bounded public model metadata and preserves thinking map holes", () => {
@@ -82,4 +84,14 @@ test("validates the effort enum and selected model support", () => {
   assert.throws(() => validateInferenceEffort("medium", projected), /not supported/);
   assert.throws(() => validateInferenceEffort("ultra", projected), /unsupported inference effort/);
   assert.throws(() => validateInferenceEffort(null, projected), /unsupported inference effort/);
+});
+
+test("the supervisor checks the capabilities a session reports instead of deriving them", () => {
+  const { thinkingLevels: _levels, ...noLevels } = rawModel();
+  assert.throws(() => projectAvailableModels([noLevels]), /thinkingLevels must be distinct supported levels/);
+  assert.throws(() => projectAvailableModels([{ ...rawModel(), thinkingLevels: ["off", "off"] }]), /thinkingLevels must be distinct/);
+  assert.throws(() => projectAvailableModels([{ ...rawModel(), thinkingLevels: ["turbo"] }]), /thinkingLevels must be distinct/);
+  assert.throws(() => projectAvailableModels([{ ...rawModel({ reasoning: false }), thinkingLevels: ["off", "high"] }]), /without reasoning must support only off/);
+  const { fastModeSupported: _fast, ...noFast } = rawModel();
+  assert.throws(() => projectAvailableModels([noFast]), /fastModeSupported must be boolean/);
 });

@@ -1,4 +1,4 @@
-import { closestThinkingLevel, readDefaultModel, resolveDefaultTarget, writeDefaultModel } from "./default-inference.mjs";
+import { closestThinkingLevel, readDefaultInference, readDefaultModel, resolveDefaultTarget, writeDefaultModel } from "./default-inference.mjs";
 import { quiescentScratchProcessRoots } from "./process-ownership.mjs";
 import { DEFAULT_SCRATCH_DIRECTORY, ensureSessionScratch, reclaimSessionScratch } from "./session-scratch.mjs";
 import { nodeMemoryDiagnostics, workerMemoryDiagnostics } from "./memory-diagnostics.mjs";
@@ -28,7 +28,6 @@ import { InboxStore, createInboxServer } from "./inbox.mjs";
 import { inboxOriginJobId } from "./protocol.mjs";
 import { NotificationStore, NOTIFICATION_IDLE_MS } from "./notification-store.mjs";
 import { JsonLineDecoder, encodeFrame } from "./framing.mjs";
-import { supportsFastMode } from "./fast-mode.mjs";
 import { projectAvailableModels, resolveModelSelection, validateInferenceEffort } from "./inference-options.mjs";
 import { actorInputDigest, actorInputPrompt,
   MAX_FRAME_BYTES,
@@ -44,7 +43,7 @@ import { captureOwnedProcessIdentity, terminateOwnedProcess } from "./process-ow
 import { normalizeProgressHeading } from "./progress-projection.mjs";
 import { PresentationDirectiveFilter, sanitizePresentationText } from "./presentation-directive.mjs";
 import { RootOutputProjector } from "./root-output-projector.mjs";
-import { coreSessionContext, coreSessionsDirectory, createCoreSession, forkableContext, removeCoreSession } from "./core-session.mjs";
+import { agentDirectory, coreSessionContext, coreSessionsDirectory, createCoreSession, forkableContext, removeCoreSession } from "./core-session.mjs";
 import { sessionSidecarPaths, publishActorGenerationSkillGrant } from "./session-paths.mjs";
 import { SessionHistoryIndex } from "./session-history-index.mjs";
 import { retryIntentForRequest, SESSION_ACTION_TIMEOUT_MS } from "./session-actions.mjs";
@@ -1282,7 +1281,7 @@ export class HarnessSupervisor {
     if (Object.keys(selection).some(key => selection[key] !== params.expected[key])) {
       throw requestFailure("stale_inference", "session inference selection changed; refresh and try again");
     }
-    const fastModeSupported = pending ? session.launch?.fastModeSupported : supportsFastMode(state.model);
+    const fastModeSupported = pending ? session.launch?.fastModeSupported : state?.model?.fastModeSupported === true;
     const changed = selection.fastMode !== params.fastMode;
     if (changed) this.store.updateSessionFastMode(params.sessionId, params.fastMode, selection.fastMode);
     // The durable receipt is authoritative. No post-commit actor RPC can turn success into failure.
@@ -2160,6 +2159,12 @@ export class HarnessSupervisor {
     const args = ["--session-dir", session.sessionFile, "--sidecar-base", sessionSidecarPaths(session.sessionFile).basePath];
     if (session.launch?.model?.resolved) args.push("--provider", session.launch.model.resolved.provider, "--model", session.launch.model.resolved.id);
     if (session.launch?.thinking?.resolved) args.push("--thinking", session.launch.thinking.resolved);
+    // The settings' default, for a session whose core has no model yet; the supervisor decides it.
+    if (!session.launch?.model?.resolved) {
+      const fallback = readDefaultInference(path.join(agentDirectory(process.env), "settings.json"));
+      if (fallback) args.push("--default-provider", fallback.provider, "--default-model", fallback.model,
+        ...(fallback.thinkingLevel ? ["--default-thinking", fallback.thinkingLevel] : []));
+    }
     args.push("--name", session.name);
     return args;
   }
@@ -2211,7 +2216,7 @@ export class HarnessSupervisor {
       if (typeof state?.model?.provider === "string" && typeof state?.model?.id === "string"
         && typeof state?.thinkingLevel === "string") {
         this.store.recordResolvedSessionInference(sessionId, session.actorGeneration,
-          { provider: state.model.provider, model: state.model.id, thinkingLevel: state.thinkingLevel, fastModeSupported: supportsFastMode(state.model) });
+          { provider: state.model.provider, model: state.model.id, thinkingLevel: state.thinkingLevel, fastModeSupported: state.model.fastModeSupported === true });
       }
       this.store.assertSessionAvailable(sessionId);
       const processIdentity = await this.processIdentityFactory(worker.pid, session.actorToken);
