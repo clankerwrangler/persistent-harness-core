@@ -10,7 +10,6 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createActorCompileCache } from "./actor-compile-cache.mjs";
 import { resolveChildLaunchPolicy } from "./child-policy.mjs";
 import {
   assistantTurnFailureFromEvents, captureAssistantTurn, resetAssistantTurn,
@@ -49,7 +48,8 @@ import { coreSessionContext, coreSessionsDirectory, createCoreSession, forkableC
 import { sessionSidecarPaths, publishActorGenerationSkillGrant } from "./session-paths.mjs";
 import { SessionHistoryIndex } from "./session-history-index.mjs";
 import { retryIntentForRequest, SESSION_ACTION_TIMEOUT_MS } from "./session-actions.mjs";
-import { DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS, PiSessionActor } from "./session-actor.mjs";
+import { DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS, SessionProcess, createSessionCompileCache } from "./session-process.mjs";
+import { SESSION_COMPILE_CACHE_ENV } from "./session-channel.mjs";
 import { CoreTranscriptReader } from "./core-transcript-reader.mjs";
 import { HarnessStore } from "./store.mjs";
 import { HomeFailureNudge } from "./home-failure-nudge.mjs";
@@ -468,7 +468,7 @@ export class HarnessSupervisor {
     skillsPath = process.env.PI_HARNESS_SKILLS_PATH || DEFAULT_SKILLS_PATH,
     runtimeDir = DEFAULT_RUNTIME_DIR,
     runtimeProvisioner = null,
-    actorFactory = (options) => new PiSessionActor(options),
+    actorFactory = (options) => new SessionProcess(options),
     transcriptReader = null,
     processIdentityFactory = captureOwnedProcessIdentity,
     processTerminator = terminateOwnedProcess,
@@ -2168,8 +2168,8 @@ export class HarnessSupervisor {
     env.PI_HARNESS_ROOT_SESSION_ID = scratch.rootSessionId;
     env.PI_HARNESS_SCRATCH_DIRECTORY = scratch.directory;
     delete env.PI_SESSION_ID; delete env.PI_SESSION_FILE;
-    delete env.PI_HARNESS_ACTOR_COMPILE_CACHE;
-    if (compileCache) env.PI_HARNESS_ACTOR_COMPILE_CACHE = compileCache.directory;
+    delete env[SESSION_COMPILE_CACHE_ENV];
+    if (compileCache) env[SESSION_COMPILE_CACHE_ENV] = compileCache.directory;
     env.PI_HARNESS_ACTOR_SKILL_GRANT = generationSkillGrantPath;
     return env;
   }
@@ -2185,7 +2185,7 @@ export class HarnessSupervisor {
       this.#broadcastNavigator("actor_error");
       throw error;
     }
-    const compileCache = await (this.#actorCompileCache ??= createActorCompileCache());
+    const compileCache = await (this.#actorCompileCache ??= createSessionCompileCache());
     check();
     const session = this.store.getActorLaunch(sessionId); if (!session || session.lifecycle !== "starting" || this.store.isSessionDeleting(sessionId)) return;
     const generationSkillGrantPath = await publishActorGenerationSkillGrant(session, skillGrant);

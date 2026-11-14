@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { HarnessClient } from "../src/client.mjs";
-import { PiSessionActor } from "../src/session-actor.mjs";
+import { SessionProcess } from "../src/session-process.mjs";
 import { HarnessSupervisor } from "./fixtures/isolated-supervisor.mjs";
 import { PythonRuntimeManager } from "../src/python-runtime.mjs";
 import { CoreTranscriptReader } from "../src/core-transcript-reader.mjs";
@@ -91,7 +91,7 @@ async function fixture(t, { real = false } = {}) {
     skillsPath: skillDir, actorInactivityMs: 0, titleGenerator: async () => null,
     coreSessionsPath: path.join(directory, "sessions"),
     ...(real ? {} : { transcriptReader: new CoreTranscriptReader({ history: async () => [] }) }),
-    actorFactory(options) { const worker = real ? new PiSessionActor(options) : new Actor(options); workers.push(worker);
+    actorFactory(options) { const worker = real ? new SessionProcess(options) : new Actor(options); workers.push(worker);
       worker.on("event", (event) => rawEvents.push(event)); return worker; },
     runtimeProvisioner: async () => { if (hold) { gatedCalls += 1; entered.resolve(); await release.promise; readinessReturned.resolve(); } return {}; },
     ...(real ? {} : { processIdentityFactory: async (pid) => ({ version: 1, pid, processGroup: pid, startTime: "synthetic", ownerToken: "synthetic" }),

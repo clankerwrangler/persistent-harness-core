@@ -1,5 +1,10 @@
 import { spawn } from "node:child_process";
-import { preferAsOomVictim } from "./oom-victim.mjs";
+import { writeFileSync } from "node:fs";
+
+// Out of memory, the operating system should give up a cron check before the supervisor.
+function preferAsOomVictim(pid) {
+  try { writeFileSync(`/proc/${pid}/oom_score_adj`, "500"); } catch {}
+}
 
 export const DEFAULT_CRON_CHECK_TIMEOUT_SECONDS = 30;
 export const MAX_CRON_CHECK_TIMEOUT_SECONDS = 120;

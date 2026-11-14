@@ -6,10 +6,11 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import { createActorCompileCache } from "../src/actor-compile-cache.mjs";
+import { createSessionCompileCache } from "../src/session-process.mjs";
 
 const exec = promisify(execFile);
 const helper = pathToFileURL(path.join(import.meta.dirname, "../src/actor-compile-cache.mjs")).href;
+const creator = pathToFileURL(path.join(import.meta.dirname, "../src/session-process.mjs")).href;
 const posix = typeof process.geteuid === "function";
 async function probe(directory, extra = {}, modulePath) {
   const env = { PATH: process.env.PATH, HOME: directory, TMPDIR: directory, ...extra };
@@ -33,7 +34,7 @@ test("compile cache creates a private owner per supervisor and disposes only its
   t.after(() => { for (const [key, value] of Object.entries(previous)) {
     if (value === undefined) delete process.env[key]; else process.env[key] = value;
   } });
-  const first = await createActorCompileCache(), second = await createActorCompileCache();
+  const first = await createSessionCompileCache(), second = await createSessionCompileCache();
   assert(first); assert(second); assert.notEqual(first.directory, second.directory);
   t.after(() => Promise.all([first.dispose(), second.dispose()]));
   const info = await lstat(first.directory);
@@ -44,15 +45,15 @@ test("compile cache creates a private owner per supervisor and disposes only its
   await writeFile(path.join(first.directory, "unowned"), "keep"); await first.dispose();
   assert.equal(await readFile(path.join(first.directory, "unowned"), "utf8"), "keep");
   await second.dispose(); await assert.rejects(lstat(second.directory), { code: "ENOENT" });
-  process.env.NODE_DISABLE_COMPILE_CACHE = "1"; assert.equal(await createActorCompileCache(), undefined);
+  process.env.NODE_DISABLE_COMPILE_CACHE = "1"; assert.equal(await createSessionCompileCache(), undefined);
   delete process.env.NODE_DISABLE_COMPILE_CACHE; process.env.NODE_COMPILE_CACHE = path.join(root, "operator");
-  assert.equal(await createActorCompileCache(), undefined);
+  assert.equal(await createSessionCompileCache(), undefined);
 });
 
 test("cache storage failure leaves creation unavailable without creating canonical state", async t => {
   const root = await privateRoot(t), file = path.join(root, "file"); await writeFile(file, "not a directory");
-  const script = `import { createActorCompileCache } from ${JSON.stringify(helper)};
-    console.log((await createActorCompileCache()) === undefined);`;
+  const script = `import { createSessionCompileCache } from ${JSON.stringify(creator)};
+    console.log((await createSessionCompileCache()) === undefined);`;
   const { stdout, stderr } = await exec(process.execPath, ["--input-type=module", "-e", script], {
     env: { PATH: process.env.PATH, HOME: root, TMPDIR: file }, timeout: 120_000 });
   assert.equal(stdout.trim(), "true"); assert.equal(stderr, "");

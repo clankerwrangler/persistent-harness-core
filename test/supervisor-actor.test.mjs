@@ -14,7 +14,7 @@ import { RootOutputProjector } from "../src/root-output-projector.mjs";
 import { defaultRootName } from "../src/root-title.mjs";
 import { actorInputCustomPayload, ACTOR_INPUT_COMMAND } from "../src/protocol.mjs";
 import { createRootTitleGenerator } from "../src/root-title-generator.mjs";
-import { PiSessionActor } from "../src/session-actor.mjs";
+import { SessionProcess } from "../src/session-process.mjs";
 import { HarnessSupervisor, fileSessions } from "./fixtures/isolated-supervisor.mjs";
 import { HomeFailureNudge } from "../src/home-failure-nudge.mjs";
 import { discoverSkills, skillCatalogForSkills } from "../src/skills.mjs";

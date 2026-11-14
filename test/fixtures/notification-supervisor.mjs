@@ -35,7 +35,7 @@ class Actor extends EventEmitter {
   async submit() { return {}; }
   send(frame) { this.sent.push(frame); }
   async close() {
-    // Like PiSessionActor, concurrent callers join shutdown through the exit event.
+    // Like SessionProcess, concurrent callers join shutdown through the exit event.
     if (this.#closePromise) return this.#closePromise;
     if (!this.isRunning) return;
     this.isRunning = false;

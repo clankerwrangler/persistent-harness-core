@@ -1,9 +1,9 @@
 // The JSON-lines transport between the supervisor and a session's worker: commands in,
 // responses and events out, and dialogs (questions for the person) on the same connection.
 import { randomUUID } from "node:crypto";
-import { PiRpcLineDecoder } from "./session-actor.mjs";
+import { MAX_SESSION_LINE_BYTES, sessionLineDecoder } from "./session-channel.mjs";
 
-export const MAX_WORKER_FRAME_BYTES = 256 * 1024 * 1024;
+export const MAX_WORKER_FRAME_BYTES = MAX_SESSION_LINE_BYTES;
 const MAX_PENDING_REQUESTS = 128;
 const errorText = (error) => error instanceof Error ? error.message : String(error);
 
@@ -79,7 +79,7 @@ export class RpcDialogBroker {
 export async function runWorkerRpc({ input = process.stdin, output = process.stdout, argv = process.argv.slice(2),
   cwd = process.cwd(), env = process.env, bootstrap, installSignalHandlers = true } = {}) {
   if (typeof bootstrap !== "function") throw new TypeError("bootstrap is required");
-  const decoder = new PiRpcLineDecoder();
+  const decoder = sessionLineDecoder();
   const pending = new Set();
   const activeIds = new Set();
   let closing = false, shutdownRequested = false, drainingShutdown = false, fatalError, worker, finish, boot;

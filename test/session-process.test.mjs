@@ -5,10 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { JsonLineDecoder } from "../src/framing.mjs";
-import { DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS, PiRpcLineDecoder, PiSessionActor } from "../src/session-actor.mjs";
+import { DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS, SessionProcess } from "../src/session-process.mjs";
+import { SESSION_CHANNEL_VERSION, sessionLineDecoder } from "../src/session-channel.mjs";
 
 test("session actor spawn failure terminates once without hanging cleanup", async () => {
-  const actor = new PiSessionActor({ command: `/definitely-missing-pi-${crypto.randomUUID()}`, args: [], cwd: "/tmp", env: process.env, requestTimeoutMs: 100, shutdownTimeoutMs: 100 });
+  const actor = new SessionProcess({ command: `/definitely-missing-pi-${crypto.randomUUID()}`, args: [], cwd: "/tmp", env: process.env, requestTimeoutMs: 100, shutdownTimeoutMs: 100 });
   const exited = new Promise((resolve) => actor.once("exit", resolve));
   await assert.rejects(actor.start(), /ENOENT/);
   const details = await exited;
@@ -26,20 +27,20 @@ test("prompt preflight can outlive the actor startup and control timeout", { tim
     const reply = (request, data) => process.stdout.write(JSON.stringify({ type: "response", id: request.id, success: true, data }) + "\n");
     lines.on("line", (line) => {
       const request = JSON.parse(line);
-      if (request.type === "get_state") reply(request, { sessionId: "delayed-preflight", isStreaming: false });
+      if (request.type === "get_state") reply(request, { sessionId: "delayed-preflight", isStreaming: false, channelVersion: 1 });
       else if (request.type === "prompt") setTimeout(() => reply(request, { accepted: true }), 750);
       else if (request.type === "slow_control") setTimeout(() => reply(request, { completed: true }), 750);
       else reply(request, {});
     });
   `;
-  const actor = new PiSessionActor({
+  const actor = new SessionProcess({
     command: process.execPath, args: ["--input-type=module", "--eval", rpcFixture], cwd: "/tmp", env: process.env,
     requestTimeoutMs: 500, startupTimeoutMs: 120_000, promptPreflightTimeoutMs: 120_000, shutdownTimeoutMs: 100,
   });
   t.after(() => actor.close());
   await actor.start();
-  await assert.rejects(actor.request("slow_control"), /Pi RPC slow_control timed out/);
-  assert.deepEqual(await actor.prompt("wait for preflight"), { accepted: true });
+  await assert.rejects(actor.request("slow_control"), /session request slow_control timed out/);
+  assert.deepEqual(await actor.submit("wait for preflight"), { accepted: true });
 });
 
 // Exercise the real worker RPC boot barrier, not a second mock transport.
@@ -59,14 +60,14 @@ function startupFixture(t, fixture, options = {}) {
         handle: async (command) => {
           if (command.type === "get_state") {
             if (states++ > 0) await delay(fixture.warmMs ?? 0);
-            return { sessionId: "startup", sessionFile: null, model: null, thinkingLevel: "off" };
+            return { sessionId: "startup", sessionFile: null, model: null, thinkingLevel: "off", channelVersion: 1 };
           }
           throw new Error("fixture refuses non-control operation");
         },
       };
     } });
   `;
-  const actor = new PiSessionActor({
+  const actor = new SessionProcess({
     command: process.execPath, args: ["--input-type=module", "--eval", rpcFixture], cwd: os.tmpdir(), env: process.env,
     requestTimeoutMs: 150, startupTimeoutMs: 120_000, shutdownTimeoutMs: 100, ...options,
   });
@@ -78,12 +79,12 @@ test("cold startup can exceed warm RPC timeouts without extending warm health", 
   const actor = startupFixture(t, { bootstrapMs: 400, warmMs: 400 });
   const state = await actor.start();
   assert.equal(state.sessionId, "startup");
-  await assert.rejects(actor.request("get_state"), /Pi RPC get_state timed out/);
+  await assert.rejects(actor.request("get_state"), /session request get_state timed out/);
 });
 
 test("startup has one finite deadline", { timeout: 180000 }, async (t) => {
   const actor = startupFixture(t, { bootstrapMs: 800 }, { startupTimeoutMs: 650 });
-  await assert.rejects(actor.start(), /RPC \S+ timed out/);
+  await assert.rejects(actor.start(), /session request \S+ timed out/);
   await actor.close();
   assert.equal(actor.isRunning, false);
 });
@@ -99,18 +100,18 @@ test("a late state response cannot promote readiness after delayed timer deliver
     }
     return data;
   };
-  await assert.rejects(actor.start(), /RPC \S+ timed out/);
+  await assert.rejects(actor.start(), /session request \S+ timed out/);
 });
 
 test("direct callers without a startup option inherit their request timeout as the handshake budget", async (t) => {
   const actor = startupFixture(t, { bootstrapMs: 400 }, { requestTimeoutMs: 200, startupTimeoutMs: undefined });
   assert.equal(actor.startupTimeoutMs, 200);
-  await assert.rejects(actor.start(), /Pi RPC get_state timed out/);
+  await assert.rejects(actor.start(), /session request get_state timed out/);
 });
 
 test("hung bootstrap fails finitely and close drains the owned worker", { timeout: 180000 }, async (t) => {
   const actor = startupFixture(t, { hang: true }, { startupTimeoutMs: 250 });
-  await assert.rejects(actor.start(), /Pi RPC get_state timed out/);
+  await assert.rejects(actor.start(), /session request get_state timed out/);
   await actor.close();
   assert.equal(actor.isRunning, false);
 });
@@ -118,7 +119,7 @@ test("hung bootstrap fails finitely and close drains the owned worker", { timeou
 test("close during bootstrap rejects pending startup without late readiness", { timeout: 180000 }, async (t) => {
   const actor = startupFixture(t, { hang: true }, { startupTimeoutMs: 4000 });
   const entered = new Promise((resolve) => actor.on("event", (frame) => { if (frame.type === "fixture_bootstrap_entered") resolve(); }));
-  const rejected = assert.rejects(actor.start(), /Pi session actor exited|startup was stopped/);
+  const rejected = assert.rejects(actor.start(), /session process exited|startup was stopped/);
   await entered;
   await actor.close();
   await rejected;
@@ -157,13 +158,13 @@ async function shutdownFixture(t, { hang = false } = {}) {
     readline.createInterface({ input: process.stdin }).on("line", (line) => {
       const request = JSON.parse(line);
       process.stdout.write(JSON.stringify({ type: "response", id: request.id, success: true,
-        data: request.type === "get_state" ? { sessionId: "shutdown", isStreaming: false } : {} }) + "\n");
+        data: request.type === "get_state" ? { sessionId: "shutdown", isStreaming: false, channelVersion: 1 } : {} }) + "\n");
     });
     await once(child.stdout, "data");
     await writeFile("child-pid", String(child.pid));
     process.stdout.write(JSON.stringify({ type: "fixture_child_ready", pid: child.pid }) + "\n");
   `;
-  const actor = new PiSessionActor({
+  const actor = new SessionProcess({
     command: process.execPath, args: ["--input-type=module", "--eval", rpcFixture], cwd: root,
     env: { ...process.env, FIXTURE_HANG: hang ? "1" : "0" },
     requestTimeoutMs: 2000, shutdownTimeoutMs: hang ? 150 : 2000,
@@ -212,8 +213,8 @@ test("an unresponsive actor still receives bounded forced shutdown with its chil
 });
 
 
-test("Pi RPC line decoder handles fragmented large responses in linear chunks", () => {
-  const decoder = new PiRpcLineDecoder();
+test("session request line decoder handles fragmented large responses in linear chunks", () => {
+  const decoder = sessionLineDecoder();
   const payload = "x".repeat(8 * 1024 * 1024);
   const encoded = Buffer.from(`${JSON.stringify({ type: "response", id: "large", success: true, data: { payload } })}\n${JSON.stringify({ type: "event", value: "next" })}\n`);
   const frames = [];
@@ -240,7 +241,7 @@ test("stderr keeps its bounded UTF-8 prefix through tails and terminal errors", 
     readline.createInterface({ input: process.stdin }).on("line", (request) => {
       const r = JSON.parse(request);
       const reply = (data) => process.stdout.write(JSON.stringify({ type: "response", id: r.id, success: true, data }) + "\n");
-      if (r.type === "get_state") reply({ sessionId: "stderr", isStreaming: false });
+      if (r.type === "get_state") reply({ sessionId: "stderr", isStreaming: false, channelVersion: 1 });
       else if (r.type === "emit") process.stderr.write(r.text, () => reply({}));
       else if (r.type === "finish") process.exit(7);
       else if (r.type !== "wait") reply({});
@@ -253,7 +254,7 @@ test("stderr keeps its bounded UTF-8 prefix through tails and terminal errors", 
     ["three-byte cut stays below unit cap", "€".repeat(21845), "€", "€".repeat(21845) + "�"],
   ]) {
     await t.test(name, async (t) => {
-      const actor = new PiSessionActor({
+      const actor = new SessionProcess({
         command: process.execPath, args: ["--input-type=module", "--eval", fixture], cwd: os.tmpdir(), env: process.env,
         requestTimeoutMs: 2000, startupTimeoutMs: 120_000, shutdownTimeoutMs: 100,
       });
@@ -271,7 +272,7 @@ test("stderr keeps its bounded UTF-8 prefix through tails and terminal errors", 
       await actor.request("emit", { text: "discarded tail".repeat(100) });
       const exited = new Promise((resolve) => actor.once("exit", resolve));
       const pending = assert.rejects(actor.request("wait"), (error) => {
-        assert.equal(error.message, `Pi session actor exited code=7 signal=null\n${expected}`);
+        assert.equal(error.message, `session process exited code=7 signal=null\n${expected}`);
         return true;
       });
       actor.send({ type: "finish" });
@@ -283,4 +284,24 @@ test("stderr keeps its bounded UTF-8 prefix through tails and terminal errors", 
       assert.equal(actor.isRunning, false);
     });
   }
+});
+
+
+test("a session process that speaks another channel version is refused, not half used", { timeout: 60000 }, async (t) => {
+  const fixture = String.raw`
+    import readline from "node:readline";
+    readline.createInterface({ input: process.stdin }).on("line", (line) => {
+      const request = JSON.parse(line);
+      process.stdout.write(JSON.stringify({ type: "response", id: request.id, success: true,
+        data: { sessionId: "old", isStreaming: false, channelVersion: ${SESSION_CHANNEL_VERSION + 1} } }) + "\n");
+    });
+    setInterval(() => {}, 1000);
+  `;
+  const actor = new SessionProcess({ command: process.execPath, args: ["--input-type=module", "--eval", fixture], cwd: os.tmpdir(),
+    env: process.env, requestTimeoutMs: 5000, shutdownTimeoutMs: 100 });
+  t.after(() => actor.close());
+  const exited = new Promise((resolve) => actor.once("exit", resolve));
+  await assert.rejects(actor.start(), new RegExp(`channel version ${SESSION_CHANNEL_VERSION + 1}, not ${SESSION_CHANNEL_VERSION}`));
+  await exited;
+  assert.equal(actor.isRunning, false, "the mismatched process is stopped");
 });

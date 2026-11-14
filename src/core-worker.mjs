@@ -1,11 +1,10 @@
-// A session's worker when it runs on the conversation core instead of pi.
+// A session's worker: the session process the supervisor starts for one session.
 //
 // It runs one `core run` process through the core's JavaScript library and does the
 // harness's per-session jobs around it: the Python kernel (the `ipython` tool), the
 // harness's prompt parts, registration with the supervisor, messages from other
-// sessions, progress headings, and usage reports. The supervisor talks to it in the
-// same JSON-lines transport as the pi worker, with a smaller command set, and gets the
-// core's own events (`core_event` frames), not pi's.
+// sessions, progress headings, and usage reports. The supervisor talks to it over the
+// session channel (session-channel.mjs) and gets the core's own events (`core_event` frames).
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -14,6 +13,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { agentDirectory, coreArgs, coreBinary, coreLibraryPath } from "./core-session.mjs";
 import { HarnessClient } from "./client.mjs";
+import { SESSION_CHANNEL_VERSION } from "./session-channel.mjs";
 import { PythonKernel } from "./kernel.mjs";
 import { PythonRuntimeManager } from "./python-runtime.mjs";
 import { PythonRecovery } from "./python-recovery.mjs";
@@ -280,7 +280,7 @@ export class CoreWorker {
     const model = this.model;
     return { sessionId: this.sessionId, sessionFile: this.options.sessionDir, sessionName: this.options.name ?? null,
       model: model ? { ...model } : null, thinkingLevel: this.selected.reasoning ?? "off",
-      isStreaming: this.core.busy, pendingMessageCount: this.followUps.length };
+      isStreaming: this.core.busy, pendingMessageCount: this.followUps.length, channelVersion: SESSION_CHANNEL_VERSION };
   }
 
   // A message from the person: steer joins the running turn, follow_up waits for it to end.
