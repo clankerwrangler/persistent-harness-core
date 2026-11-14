@@ -15,7 +15,7 @@ import { agentDirectory, coreArgs, coreBinary, coreLibraryPath } from "./core-se
 import { HarnessClient } from "./client.mjs";
 import { SESSION_CHANNEL_VERSION } from "./session-channel.mjs";
 import { PythonKernel } from "./kernel.mjs";
-import { PythonRuntimeManager } from "./python-runtime.mjs";
+import { launchPython } from "./python-launch.mjs";
 import { PythonRecovery } from "./python-recovery.mjs";
 import { createHostHandlers } from "./host-handlers.mjs";
 import { discoverSkills, manifestForSkills, writeManifestAtomic } from "./skills.mjs";
@@ -122,7 +122,7 @@ export class CoreWorker {
       stepsPath: options.sidecarBase ? `${options.sidecarBase}.python-steps.json` : undefined,
     });
     this.manifest = undefined;
-    this.runtime = new PythonRuntimeManager({ runtimeDir: path.join(agentDir, "harness", "kernel-runtime") });
+    this.runtimeDir = path.join(agentDir, "harness", "kernel-runtime");
     // The supervisor's shutdown drain waits for this.
     this.coordinator = { waitForIdle: () => core.idle() };
     // Failed turns are saved, then reported (the parent or Home hears of them), then the
@@ -487,11 +487,9 @@ export class CoreWorker {
       this.manifest ??= await this.#resolveManifest();
       const manifest = this.manifest;
       const context = this.hostContext();
-      const { kernel, ready } = await this.runtime.launch({
+      const { kernel, ready } = await launchPython({
+        runtimeDir: this.runtimeDir,
         skills: manifest.skills,
-        consent: ({ pythonVersion, packages }) => this.broker.ui.confirm("Install managed Python runtime?",
-          `Persistent Harness needs CPython ${pythonVersion} and:\n${packages.join("\n")}`, { timeout: 60_000 }),
-        onProgress: () => {},
         createKernel: (runtime) => new PythonKernel({
           pythonPath: runtime.pythonPath, expectedVersions: runtime.expectedVersions,
           kernelScript: KERNEL_SCRIPT, runtimeSupportDir: PYTHON_RUNTIME_SUPPORT,

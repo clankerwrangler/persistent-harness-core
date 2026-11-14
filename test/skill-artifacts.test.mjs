@@ -11,6 +11,7 @@ import test from "node:test";
 import { discoverSkills, manifestForSkills, materializeSkills, verifyManifest } from "../src/skills.mjs";
 import { prepareSkillArtifact, skillArtifactLocation, verifySkillArtifact } from "../src/skill-artifacts.mjs";
 import { PythonRuntimeManager, runtimeVersions } from "../src/python-runtime.mjs";
+import { launchPython } from "../src/python-launch.mjs";
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "skill-artifacts-"));
@@ -152,9 +153,8 @@ test("managed compatible reuse retires only harness-owned .pth without installat
   await writeFile(path.join(site, "unrelated.pth"), "unrelated customization\n");
   const versions = { python: runtimeVersions.python, ipython: runtimeVersions.ipython, dill: runtimeVersions.dill };
   await writeFile(path.join(environment, "runtime.json"), JSON.stringify({ version: 1, environmentId: "completed", versions, environmentSpec: { dependencies: [] } }));
-  const manager = new PythonRuntimeManager({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null });
   let starts = 0;
-  const selected = await manager.launch({ skills: await f.freeze(), consent: () => assert.fail("no environment install"),
+  const selected = await launchPython({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null, skills: await f.freeze(),
     createKernel: async candidate => ({ start: async ({ onRuntimeValidated }) => {
       starts++; assert.equal(candidate.environmentId, "completed"); await onRuntimeValidated(versions); return { versions };
     }, close: async () => {} }) });

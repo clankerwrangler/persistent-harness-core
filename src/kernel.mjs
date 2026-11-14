@@ -5,7 +5,7 @@ import path from "node:path";
 import { constants } from "node:fs";
 import { JsonLineDecoder, encodeFrame } from "./framing.mjs";
 import { historyMemoryDiagnostics } from "./memory-diagnostics.mjs";
-import { PythonRuntimeRejection } from "./python-runtime-errors.mjs";
+import { PythonRuntimeRejection } from "./python-runtime-layout.mjs";
 import { preferAsOomVictim } from "./oom-victim.mjs";
 
 const KERNEL_FRAME_BYTES = 1024 * 1024;

@@ -6,7 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { PythonKernel } from "../src/kernel.mjs";
 import { PythonRuntimeManager, runtimeVersions } from "../src/python-runtime.mjs";
-import { PythonRuntimeRejection } from "../src/python-runtime-errors.mjs";
+import { PythonRuntimeRejection } from "../src/python-runtime-layout.mjs";
+import { launchPython } from "../src/python-launch.mjs";
 import { discoverSkillsFromDirectory, manifestForSkills, skillCatalogForSkills } from "../src/skills.mjs";
 
 const packageRoot = path.resolve(import.meta.dirname, "..");
@@ -45,7 +46,9 @@ async function fixture(t) {
   });
   return { root, pythonPath, manifest, createKernel, kernels, dependencyPath,
     events: async () => (await readFile(eventsPath, "utf8")).trim().split("\n").map(JSON.parse),
-    manager: new PythonRuntimeManager({ runtimeDir: path.join(root, "unused"), pythonOverride: pythonPath }) };
+    manager: new PythonRuntimeManager({ runtimeDir: path.join(root, "unused"), pythonOverride: pythonPath }),
+    launch: (options = {}) => launchPython({ runtimeDir: path.join(root, "unused"), pythonOverride: pythonPath,
+      skills: manifest.skills, createKernel, ...options }) };
 }
 
 async function snapshot(stateDir, expression) {
@@ -68,7 +71,7 @@ async function completed(f, name, bad = false) {
 
 test("launch owns one real import per generation; standalone checks and unchanged-catalog invalidation remain", async t => {
   const f = await fixture(t);
-  const first = await f.manager.launch({ skills: f.manifest.skills, createKernel: f.createKernel });
+  const first = await f.launch();
   assert.deepEqual(first.versions, versions);
   assert.equal((await f.events()).length, 1, "launch has no disposable skill import");
   assert.notEqual((await f.events())[0].argv[0], "-c");
@@ -81,7 +84,7 @@ test("launch owns one real import per generation; standalone checks and unchange
   assert.deepEqual(await f.manager.ensure({ skills: unchanged.skills }), standalone, "default successful ensure memo remains");
   assert.equal((await first.kernel.execute("witness.VALUE")).mime["text/plain"], "'valid'");
   await first.kernel.close({ snapshot: false });
-  await assert.rejects(f.manager.launch({ skills: unchanged.skills, createKernel: f.createKernel }), PythonRuntimeRejection);
+  await assert.rejects(f.launch({ skills: unchanged.skills }), PythonRuntimeRejection);
   assert.equal((await f.events()).length, 3, "replacement performs a fresh import despite ensure memo");
   await assert.rejects(new PythonRuntimeManager({ runtimeDir: path.join(f.root, "unused"), pythonOverride: f.pythonPath })
     .ensure({ skills: unchanged.skills }), /external dependency changed/);
@@ -119,8 +122,7 @@ test("start coalesces one process and each replacement checks managed pins befor
 test("managed compatible fallback retires a version-rejected real candidate before retaining its successor", async t => {
   const f = await fixture(t);
   await completed(f, "a-bad", true); await completed(f, "b-good");
-  const manager = new PythonRuntimeManager({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null });
-  const launched = await manager.launch({ skills: f.manifest.skills, consent: async () => { throw new Error("no repair needed"); },
+  const launched = await launchPython({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null, skills: f.manifest.skills,
     createKernel: runtime => { assert(f.kernels.every(kernel => !kernel.isRunning)); return f.createKernel(runtime); } });
   assert.equal(launched.environmentId, "b-good");
   assert.equal(launched.compatible, true);
@@ -129,14 +131,13 @@ test("managed compatible fallback retires a version-rejected real candidate befo
   assert.equal(launched.kernel.isRunning, true);
 });
 
-test("a real restore failure does not try a compatible successor or ask to repair", async t => {
+test("a real restore failure does not try a compatible successor", async t => {
   const f = await fixture(t);
   await completed(f, "a-valid"); await completed(f, "b-unused");
   const restored = path.join(f.root, "restore-entered");
   await snapshot(path.join(f.root, "state"), `(__import__('pathlib').Path(${JSON.stringify(restored)}).write_text('entered'), __import__('os')._exit(37))`);
-  const manager = new PythonRuntimeManager({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null });
-  await assert.rejects(manager.launch({ skills: f.manifest.skills, createKernel: f.createKernel,
-    consent: async () => { throw new Error("restore must not repair"); } }), /Python kernel exited code=37/);
+  await assert.rejects(launchPython({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null, skills: f.manifest.skills,
+    createKernel: f.createKernel }), /Python kernel exited code=37/);
   assert.equal(await readFile(restored, "utf8"), "entered");
   assert.equal((await f.events()).length, 1);
   assert(f.kernels.every(kernel => !kernel.isRunning));
@@ -155,67 +156,49 @@ async function syntheticInstaller(f) {
     commands: async () => (await readFile(log, "utf8")).trim().split("\n").map(JSON.parse) };
 }
 
-test("a built environment completes from the real process before restore; later restore failure keeps completion", async t => {
+test("starting Python never installs: with no installed runtime it fails, builds nothing and takes no lock", async t => {
   const f = await fixture(t); const installer = await syntheticInstaller(f);
-  const restored = path.join(f.root, "restore-entered");
-  await snapshot(path.join(f.root, "state"), `(__import__('pathlib').Path(${JSON.stringify(restored)}).write_text('entered'), __import__('os')._exit(38))`);
-  let candidate;
-  await assert.rejects(installer.manager.launch({ skills: f.manifest.skills, consent: async () => true,
-    createKernel: runtime => { candidate = runtime; return f.createKernel(runtime); } }), /Python kernel exited code=38/);
-  const record = JSON.parse(await readFile(path.join(path.dirname(path.dirname(candidate.pythonPath)), "runtime.json"), "utf8"));
-  assert.deepEqual(record.versions, versions);
-  assert.equal(await readFile(restored, "utf8"), "entered");
-  assert.equal((await f.events()).length, 1);
-  assert.deepEqual((await installer.commands()).map(args => args.slice(0, 2)), [["python", "install"], ["venv", path.dirname(path.dirname(candidate.pythonPath))], ["pip", "install"]]);
+  await assert.rejects(launchPython({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null, skills: f.manifest.skills,
+    createKernel: f.createKernel }), /not installed; the supervisor installs it/);
+  assert.equal(f.kernels.length, 0, "no kernel was started");
+  assert.equal(await exists(path.join(f.root, "uv.jsonl")), false, "nothing was built");
   assert.equal(await exists(path.join(f.root, "runtime", "install.lock")), false);
-});
-
-test("completion publication failure closes its real candidate before restore or exposure", async t => {
-  const f = await fixture(t); const installer = await syntheticInstaller(f);
-  const restored = path.join(f.root, "restored");
-  await snapshot(path.join(f.root, "state"), `__import__('pathlib').Path(${JSON.stringify(restored)}).write_text('restored')`);
-  await assert.rejects(installer.manager.launch({ skills: f.manifest.skills, consent: async () => true,
-    createKernel: async runtime => {
-      await mkdir(path.join(path.dirname(path.dirname(runtime.pythonPath)), "runtime.json"));
-      return f.createKernel(runtime);
-    } }), error => !(error instanceof PythonRuntimeRejection) && error.code === "EISDIR");
-  assert.equal((await f.events()).length, 1);
-  assert.equal(await exists(restored), false);
-  assert(f.kernels.every(kernel => !kernel.isRunning));
-  assert.equal(await exists(path.join(f.root, "runtime", "install.lock")), false);
+  await installer.manager.ensure({ skills: f.manifest.skills, consent: async () => true });
+  const launched = await launchPython({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null, skills: f.manifest.skills,
+    createKernel: f.createKernel });
+  assert.deepEqual(launched.versions, versions, "once the supervisor installed it, the session starts in it");
+  assert.equal((await installer.commands()).length, 3, "the one build is the installer's");
 });
 
 test("missing executable is a runtime rejection, but missing script and configuration are startup failures", async t => {
   const f = await fixture(t);
-  await assert.rejects(f.manager.launch({ skills: f.manifest.skills,
+  await assert.rejects(f.launch({
     createKernel: runtime => f.createKernel(runtime, { pythonPath: path.join(f.root, "missing-python") }) }), PythonRuntimeRejection);
-  await assert.rejects(f.manager.launch({ skills: f.manifest.skills,
+  await assert.rejects(f.launch({
     createKernel: runtime => f.createKernel(runtime, { kernelScript: path.join(f.root, "missing-script") }) }),
     error => !(error instanceof PythonRuntimeRejection));
   const file = path.join(f.root, "not-directory"); await writeFile(file, "fixture");
-  await assert.rejects(f.manager.launch({ skills: f.manifest.skills,
+  await assert.rejects(f.launch({
     createKernel: runtime => f.createKernel(runtime, { stateDir: file }) }),
     error => !(error instanceof PythonRuntimeRejection));
-  await assert.rejects(f.manager.launch({ skills: f.manifest.skills,
+  await assert.rejects(f.launch({
     createKernel: runtime => f.createKernel(runtime, { cwd: path.join(f.root, "missing-cwd") }) }),
     error => !(error instanceof PythonRuntimeRejection));
   assert(f.kernels.every(kernel => !kernel.isRunning));
 });
 
-test("concurrent managed launches recheck completion under the existing lock without caching a process", async t => {
+test("concurrent launches in one installed runtime start separate kernels without caching a process", async t => {
   const f = await fixture(t); const installer = await syntheticInstaller(f);
+  await installer.manager.ensure({ skills: f.manifest.skills, consent: async () => true });
   let ordinal = 0;
   const createKernel = runtime => f.createKernel(runtime, { stateDir: path.join(f.root, `state-${++ordinal}`) });
-  const [first, second] = await Promise.all([1, 2].map(() => installer.manager.launch({
-    skills: f.manifest.skills, consent: async () => true, createKernel,
+  const [first, second] = await Promise.all([1, 2].map(() => launchPython({
+    runtimeDir: path.join(f.root, "runtime"), pythonOverride: null, skills: f.manifest.skills, createKernel,
   })));
   assert.equal(first.environmentId, second.environmentId);
   assert.notEqual(first.kernel, second.kernel);
   assert.deepEqual(first.versions, versions); assert.deepEqual(second.versions, versions);
-  assert.equal((await f.events()).length, 2);
-  assert.equal(new Set((await f.events()).map(event => event.pid)).size, 2);
-  assert.equal((await installer.commands()).length, 3, "only the lock winner builds");
-  assert.equal(await exists(path.join(f.root, "runtime", "install.lock")), false);
+  assert.equal((await installer.commands()).length, 3, "starting adds no build");
   assert.equal((await first.kernel.execute("generation_value = 17")).ok, true);
   assert.equal((await second.kernel.execute("'generation_value' in globals()")).mime["text/plain"], "False");
 });
@@ -224,8 +207,7 @@ test("an explicit interpreter retains its unpinned observed-version policy", asy
   const f = await fixture(t);
   const wrapper = path.join(f.root, "override-python");
   await writeFile(wrapper, `#!/bin/sh\nexport SYNTHETIC_BAD_VERSION=1\nexec ${JSON.stringify(f.pythonPath)} "$@"\n`, { mode: 0o700 });
-  const launched = await new PythonRuntimeManager({ runtimeDir: path.join(f.root, "unused"), pythonOverride: wrapper })
-    .launch({ skills: f.manifest.skills, createKernel: f.createKernel });
+  const launched = await f.launch({ pythonOverride: wrapper });
   assert.equal(launched.managed, false);
   assert.equal(launched.versions.dill, "wrong");
   assert.equal((await launched.kernel.execute("witness.VALUE")).mime["text/plain"], "'valid'");
@@ -236,19 +218,16 @@ test("managed launch does not repair cwd, ambiguous executable, or post-import m
     const f = await fixture(t);
     const first = await completed(f, "a-valid"); await completed(f, "b-unused");
     if (mode === "ambiguous") await writeFile(path.join(first, "bin", "python"), "#!/missing-synthetic-loader\n", { mode: 0o700 });
-    let attempts = 0; let consent = 0;
+    let attempts = 0;
     const malformed = structuredClone(f.manifest);
     delete malformed.skills[0].instructions;
-    const manager = new PythonRuntimeManager({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null });
-    await assert.rejects(manager.launch({ skills: f.manifest.skills,
-      consent: async () => { consent++; return true; },
+    await assert.rejects(launchPython({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null, skills: f.manifest.skills,
       createKernel: runtime => {
         attempts++;
         return f.createKernel(runtime, mode === "cwd" ? { cwd: path.join(f.root, "missing-cwd") }
           : mode === "metadata" ? { manifest: malformed } : {});
       } }), error => !(error instanceof PythonRuntimeRejection));
     assert.equal(attempts, 1, "a host/configuration failure must not try the compatible successor");
-    assert.equal(consent, 0);
     assert.equal(await exists(path.join(f.root, "runtime", "install.lock")), false);
     assert(f.kernels.every(kernel => !kernel.isRunning));
     if (mode === "metadata") assert.equal((await f.events()).length, 1, "the genuine import succeeds before metadata fails");
@@ -259,9 +238,8 @@ test("a proven missing managed interpreter permits compatible fallback", async t
   const f = await fixture(t);
   const missing = await completed(f, "a-missing"); await completed(f, "b-good");
   await rm(path.join(missing, "bin", "python"));
-  const manager = new PythonRuntimeManager({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null });
-  const launched = await manager.launch({ skills: f.manifest.skills, createKernel: f.createKernel,
-    consent: async () => { throw new Error("the compatible interpreter is already ready"); } });
+  const launched = await launchPython({ runtimeDir: path.join(f.root, "runtime"), pythonOverride: null, skills: f.manifest.skills,
+    createKernel: f.createKernel });
   assert.equal(launched.environmentId, "b-good");
   assert.equal(f.kernels.length, 2);
   assert.equal(f.kernels[0].isRunning, false);

@@ -3,15 +3,13 @@ import { spawn } from "node:child_process";
 import { access, chmod, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { PythonRuntimeRejection } from "./python-runtime-errors.mjs";
+import { DILL_VERSION, IPYTHON_VERSION, PYTHON_VERSION, assertManagedVersions, compatibleEnvironments,
+  retireManagedSkillSources, runtimeEnvironment } from "./python-runtime-layout.mjs";
 
 const RUNTIME_SUPPORT_DIR = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), "python-runtime");
 const UV_VERSION = "0.12.3";
 const UV_ARCHIVE = "uv-x86_64-unknown-linux-gnu.tar.gz";
 const UV_SHA256 = "600cf9a742aca00d292673b16b5acffaa7b8c269a364ad0c2e79498dcb1fe101";
-const PYTHON_VERSION = "3.12.12";
-const IPYTHON_VERSION = "9.10.0";
-const DILL_VERSION = "0.3.8";
 
 function hash(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -122,12 +120,6 @@ async function acquireInstallLock(lockPath, timeoutMs = 180_000) {
   }
 }
 
-function assertManagedVersions(versions) {
-  if (versions.python !== PYTHON_VERSION || versions.ipython !== IPYTHON_VERSION || versions.dill !== DILL_VERSION) {
-    throw new Error(`managed runtime version mismatch: ${JSON.stringify(versions)}`);
-  }
-}
-
 export class PythonRuntimeManager {
   #ensurePromise;
 
@@ -145,43 +137,6 @@ export class PythonRuntimeManager {
     return this.#ensurePromise;
   }
 
-  async launch({ createKernel, ...options }) {
-    let retained;
-    const retire = async () => {
-      const failed = retained;
-      retained = undefined;
-      await failed?.close({ snapshot: false });
-    };
-    try {
-      return await this.#ensureOnce({
-        ...options,
-        isRuntimeRejection: (error) => error instanceof PythonRuntimeRejection,
-        validate: async (candidate, publish = async () => {}) => {
-          retained = await createKernel({ ...candidate, expectedVersions: candidate.managed
-            ? { python: PYTHON_VERSION, ipython: IPYTHON_VERSION, dill: DILL_VERSION } : undefined });
-          try {
-            const ready = await retained.start({ onRuntimeValidated: async (versions) => {
-              if (candidate.managed) {
-                try { assertManagedVersions(versions); }
-                catch (error) { throw new PythonRuntimeRejection(error.message, { cause: error }); }
-              }
-              await publish(versions);
-            } });
-            return { ...candidate, versions: ready.versions, kernel: retained, ready };
-          } catch (error) {
-            // Retirement must finish before the selection loop can try a successor.
-            await retire();
-            throw error;
-          }
-        },
-      });
-    } catch (error) {
-      // Also owns failures after validation, including install-lock release.
-      await retire();
-      throw error;
-    }
-  }
-
   async #validateStandalone(candidate, skills, publish = async () => {}) {
     const versions = await validatePython(candidate.pythonPath, skills);
     if (candidate.managed) assertManagedVersions(versions);
@@ -189,35 +144,11 @@ export class PythonRuntimeManager {
     return { ...candidate, versions };
   }
 
-  async #removeManagedSkillSources(environmentDir) {
-    // Only the harness-owned shim is retired. Manifest PYTHONPATH is already
-    // authoritative; unrelated site customization and override envs stay intact.
-    const pythonMinor = PYTHON_VERSION.split(".").slice(0, 2).join(".");
-    try {
-      await unlink(path.join(environmentDir, "lib", `python${pythonMinor}`, "site-packages", "persistent-harness-skills.pth"));
-    } catch (error) { if (error?.code !== "ENOENT") throw error; }
-  }
-
   async #findCompatibleCompleted(dependencies, validate, isRuntimeRejection) {
-    const environmentsDir = path.join(this.runtimeDir, "environments");
-    let entries;
-    try { entries = await readdir(environmentsDir, { withFileTypes: true }); } catch (error) {
-      if (error?.code === "ENOENT") return undefined;
-      throw error;
-    }
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (!entry.isDirectory()) continue;
-      const environmentDir = path.join(environmentsDir, entry.name);
-      let record;
+    for (const found of await compatibleEnvironments(this.runtimeDir, dependencies)) {
+      await retireManagedSkillSources(found.environmentDir);
       try {
-        record = JSON.parse(await readFile(path.join(environmentDir, "runtime.json"), "utf8"));
-        if (record?.version !== 1 || JSON.stringify(record.environmentSpec?.dependencies ?? []) !== JSON.stringify(dependencies)) continue;
-        assertManagedVersions(record.versions ?? {});
-      } catch { continue; }
-      await this.#removeManagedSkillSources(environmentDir);
-      try {
-        return await validate({ pythonPath: path.join(environmentDir, "bin", "python"),
-          managed: true, environmentId: record.environmentId ?? entry.name, compatible: true });
+        return await validate({ pythonPath: found.pythonPath, managed: true, environmentId: found.environmentId, compatible: true });
       } catch (error) {
         if (!isRuntimeRejection(error)) throw error;
       }
@@ -236,21 +167,10 @@ export class PythonRuntimeManager {
       throw new Error("managed Python currently supports Linux x64 only; set PI_HARNESS_PYTHON to a compatible interpreter");
     }
 
-    const dependencies = [...new Set(skills.flatMap((skill) => skill.python?.dependencies ?? []))].sort();
-    const environmentSpec = {
-      python: PYTHON_VERSION,
-      ipython: IPYTHON_VERSION,
-      dill: DILL_VERSION,
-      dependencies,
-      skills: skills.map((skill) => [skill.id, skill.version, skill.contentHash, skill.python?.srcPath ?? null]),
-    };
-    const environmentId = hash(JSON.stringify(environmentSpec)).slice(0, 20);
-    const environmentDir = path.join(this.runtimeDir, "environments", environmentId);
-    const pythonPath = path.join(environmentDir, "bin", "python");
-    const completePath = path.join(environmentDir, "runtime.json");
+    const { dependencies, environmentSpec, environmentId, environmentDir, pythonPath, completePath } = runtimeEnvironment(this.runtimeDir, skills);
     const useCompleted = async () => {
       if (!await exists(completePath)) return undefined;
-      await this.#removeManagedSkillSources(environmentDir);
+      await retireManagedSkillSources(environmentDir);
       try {
         return await validate({ pythonPath, managed: true, environmentId });
       } catch (error) {
