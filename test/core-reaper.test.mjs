@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { CoreReaper, coreReap, REAP_AGE_SECONDS, REAP_PROTOCOL } from "../src/core-reaper.mjs";
-import { RECOVERY_DETAIL_FIELDS } from "../src/python-recovery.mjs";
+import { RECOVERY_DETAIL_FIELDS } from "../src/python-recovery-fields.mjs";
 
 async function folder(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "core-reaper-"));

@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { coreBinary } from "./core-session.mjs";
-import { RECOVERY_DETAIL_FIELDS } from "./python-recovery.mjs";
+import { RECOVERY_DETAIL_FIELDS } from "./python-recovery-fields.mjs";
 
 export const REAP_AGE_SECONDS = 14 * 24 * 60 * 60;
 const DAY_MS = 24 * 60 * 60 * 1000;
