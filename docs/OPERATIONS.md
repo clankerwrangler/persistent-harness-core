@@ -7,7 +7,7 @@ Use the dependency environment from [Installation](DEPENDENCIES.md). These comma
 ```sh
 node bin/harness-supervisor.mjs ensure
 node bin/harness-supervisor.mjs status
-node bin/persistent-pi.mjs --list
+node bin/harness.mjs --list
 node bin/harness-supervisor.mjs shutdown
 ```
 

@@ -32,7 +32,7 @@ async function ensure(runtime) {
   try {
     const rollout = JSON.parse(await readFile(path.join(path.dirname(runtime.databasePath), "phase-p-rollout.json"), "utf8"));
     if (rollout.state !== "complete") throw new Error(rollout.state === "waiting-for-legacy-ui-exit"
-      ? "Phase P rollout is waiting for the legacy Pi UI to close; close it before launching persistent-pi"
+      ? "Phase P rollout is waiting for the legacy Pi UI to close; close it before launching harness"
       : `Phase P rollout is not complete: ${rollout.state}`);
   } catch (error) { if (error?.code !== "ENOENT" && !String(error?.message).startsWith("Phase P rollout")) throw error; if (String(error?.message).startsWith("Phase P rollout")) throw error; }
   await execFileAsync(process.execPath, [supervisorBin, "ensure", "--socket", runtime.socketPath, "--db", runtime.databasePath, "--pid", runtime.pidPath], { env: process.env, timeout: 15_000 });
@@ -60,7 +60,7 @@ async function waitSettled(client, sessionId, timeoutMs = 120_000) {
 
 async function main() {
   const options = parse(process.argv.slice(2));
-  if (options.help) { console.log("persistent-pi [--list|--create] [--session ID|NAME] [--cwd PATH] [--name NAME] [--provider P --model M] [--thinking LEVEL] [--prompt TEXT --wait] [--json]"); return; }
+  if (options.help) { console.log("harness [--list|--create] [--session ID|NAME] [--cwd PATH] [--name NAME] [--provider P --model M] [--thinking LEVEL] [--prompt TEXT --wait] [--json]"); return; }
   const runtime = paths(options); await ensure(runtime);
   const client = new HarnessClient({ socketPath: runtime.socketPath, requestTimeoutMs: 120_000 });
   const registration = await client.start({ registrationType: "register_client", clientInstanceId: randomUUID() });
@@ -87,8 +87,8 @@ async function main() {
     temporary.question(prompt, (answer) => { temporary.close(); resolve(answer); });
   });
   let dialogTail = Promise.resolve();
-  const handleExtensionUi = async (actorEvent) => {
-    if (actorEvent?.type !== "extension_ui_request") return;
+  const handleDialog = async (actorEvent) => {
+    if (actorEvent?.type !== "dialog_request") return;
     if (actorEvent.method === "notify") { console.error(actorEvent.message); return; }
     if (!["select", "confirm", "input", "editor"].includes(actorEvent.method)) return;
     let reply;
@@ -103,11 +103,11 @@ async function main() {
       const answer = await ask(`${actorEvent.title}${actorEvent.placeholder ? ` (${actorEvent.placeholder})` : ""}: `);
       reply = answer ? { value: answer } : { cancelled: true };
     }
-    await client.request("respond_extension_ui", { sessionId: selected, uiRequestId: actorEvent.id, ...reply });
+    await client.request("respond_dialog", { sessionId: selected, uiRequestId: actorEvent.id, ...reply });
   };
-  const queueExtensionUi = (actorEvent) => { dialogTail = dialogTail.then(() => handleExtensionUi(actorEvent)).catch((error) => console.error(error instanceof Error ? error.message : String(error))); };
-  client.on("event", (frame) => { if (frame.event === "actor_event" && frame.data?.sessionId === selected) queueExtensionUi(frame.data.event); });
-  for (const retained of attached.events ?? []) queueExtensionUi(retained.event);
+  const queueDialog = (actorEvent) => { dialogTail = dialogTail.then(() => handleDialog(actorEvent)).catch((error) => console.error(error instanceof Error ? error.message : String(error))); };
+  client.on("event", (frame) => { if (frame.event === "actor_event" && frame.data?.sessionId === selected) queueDialog(frame.data.event); });
+  for (const retained of attached.events ?? []) queueDialog(retained.event);
   const history = await client.request("get_actor_entries", { sessionId: selected, since: null });
   if (!options.json) { console.log(`Attached ${sessionLine(attached.session)}`); if (history.truncated) console.log("… earlier entries omitted …"); for (const entry of history.entries) { const line = renderEntry(entry); if (line) console.log(line); } const partial = replayText(attached.events); if (partial) process.stdout.write(`agent> ${partial}`); }
   if (options.prompt) {

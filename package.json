@@ -18,7 +18,7 @@
   },
   "bin": {
     "harness-supervisor": "./bin/harness-supervisor.mjs",
-    "persistent-pi": "./bin/persistent-pi.mjs",
+    "harness": "./bin/harness.mjs",
     "persistent-harness-provision-skills": "./bin/provision-skills.mjs"
   },
   "engines": {

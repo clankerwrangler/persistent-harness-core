@@ -17,7 +17,7 @@ Follow [Dependencies and installation](docs/DEPENDENCIES.md) to point the harnes
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund
 node bin/provision-skills.mjs --yes
-node bin/persistent-pi.mjs --create
+node bin/harness.mjs --create
 ```
 
 The provisioning command approves downloads of pinned uv, Python, IPython, and dill. Set `PI_HARNESS_PYTHON` to a compatible existing interpreter instead if provisioning is not wanted. The nine Python-backed skills declare no additional Python packages; `inbox` is guidance-only.
@@ -27,8 +27,8 @@ Provider sign-ins belong to the core: sign in with `core login PROVIDER`, and th
 ## Use
 
 ```sh
-node bin/persistent-pi.mjs --list
-node bin/persistent-pi.mjs --session SESSION --prompt "Continue the task" --wait
+node bin/harness.mjs --list
+node bin/harness.mjs --session SESSION --prompt "Continue the task" --wait
 ```
 
 The terminal supports `:sessions`, `:attach NAME_OR_ID`, `:new [NAME]`, `:abort`, and `:quit`. In Python, inspect `rlm?`, `agent_message?`, `cron?`, or another bundled capability. The default catalog is this repository's `skills/`; `PI_HARNESS_SKILLS_PATH` selects another complete catalog.
