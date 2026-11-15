@@ -33,7 +33,7 @@ import { MessageClock } from "./message-time.mjs";
 import { locationBlock } from "./input-location.mjs";
 import { LiveView } from "./live-view.mjs";
 import {
-  INCOMING_MESSAGE_TYPE, KERNEL_SCRIPT, PYTHON_RUNTIME_SUPPORT, USAGE_ENTRY_TYPE, 
+  INCOMING_MESSAGE_TYPE, KERNEL_SCRIPT, PYTHON_RUNTIME_SUPPORT, USAGE_ENTRY_TYPE,
   incomingCustomPayload, nativeAsyncEnabled, pythonToolResult, skillPrompt,
 } from "./python-tool.mjs";
 const exec = promisify(execFile);

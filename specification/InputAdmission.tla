@@ -1,8 +1,8 @@
 ------------------------- MODULE InputAdmission -------------------------
 \* Sources:
-\*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
+\*   src/supervisor.mjs sha256:399af6a6b9ea4c75e9000de91f0ccc9af6e25d8dcf9477400229cb69d060af4e
 \*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
-\*   src/session-actor.mjs sha256:1f9f6094b89c2f672521dcb3c5b388a88f288c60de5402e0b59ac620dc691f4c
+\*   src/session-process.mjs sha256:fc18d784685a5f20f85819c29a192e3931a161870b0044df60e68a757dde7bfe
 
 EXTENDS Naturals, FiniteSets, TLC
 CONSTANTS Inputs, StartupBudget, RpcBudget, CoupleStartup, ExtendWarm

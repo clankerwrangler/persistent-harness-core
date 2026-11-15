@@ -4,6 +4,7 @@ import path from "node:path";
 import { HarnessSupervisor as Supervisor } from "../../src/supervisor.mjs";
 import { CoreTranscriptReader } from "../../src/core-transcript-reader.mjs";
 import { coreSessionHistory } from "../../src/core-transcript-reader.mjs";
+import { coreSessionsDirectory } from "../../src/core-layout.mjs";
 export * from "../../src/supervisor.mjs";
 
 /**
@@ -31,14 +32,22 @@ export function fileSessions(directory) {
   };
 }
 
-// Lifecycle fixtures must not create workspace scratch or inspect live background owners.
+// Core sessions go where the environment puts them when that is inside the fixture's folder
+// (a test that set up its own agent directory), else into the fixture's state folder.
+function fixtureSessions(state) {
+  const configured = coreSessionsDirectory(), relative = path.relative(path.dirname(state), configured);
+  return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? configured : path.join(state, "core-sessions");
+}
+
+// Lifecycle fixtures must not create workspace scratch, live core sessions or a live inbox, or inspect live background owners.
 export class HarnessSupervisor extends Supervisor {
   constructor(options) {
     const state = path.dirname(options.databasePath);
     let supervisor;
     const transcriptReader = options.transcriptReader ?? new CoreTranscriptReader({ history: fixtureHistory,
       inputReceiptReader: (inputId, sessionId) => supervisor.store.getActorInput(inputId, sessionId, { includeDigest: true }) });
-    super({ scratchDirectory: path.join(state, "scratch"), backgroundJobsDirectory: path.join(state, "background-jobs"), ...options, transcriptReader });
+    super({ scratchDirectory: path.join(state, "scratch"), backgroundJobsDirectory: path.join(state, "background-jobs"),
+      coreSessionsPath: fixtureSessions(state), inboxPort: null, ...options, transcriptReader });
     supervisor = this;
   }
 }

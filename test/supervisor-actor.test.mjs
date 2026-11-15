@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 
+import { withCapabilities } from "../src/model-capabilities.mjs";
 import assert from "node:assert/strict";
 import { EventEmitter, once } from "node:events";
 import { appendFile, lstat, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -757,7 +758,7 @@ class InferencePiActor extends FakePiActor {
   async start() {
     this.isRunning = true;
     return { sessionId: this.session.sessionId, sessionFile: this.session.sessionFile, isStreaming: false,
-      model: this.session.launch.model.resolved, thinkingLevel: this.session.launch.thinking.resolved };
+      model: this.session.launch.model.resolved && withCapabilities(this.session.launch.model.resolved), thinkingLevel: this.session.launch.thinking.resolved };
   }
   applySelection() {
     const pending = this.pendingInference;
@@ -776,10 +777,10 @@ class InferencePiActor extends FakePiActor {
       { provider: "fake", id: "alpha", name: "Alpha", reasoning: true, contextWindow: 200000,
         thinkingLevelMap: { xhigh: "xhigh", max: null }, apiKey: "must-not-leak", baseUrl: "https://secret" },
       { provider: "fake", id: "beta", name: "Beta", reasoning: false, contextWindow: 100000, headers: { authorization: "secret" } },
-    ] };
+    ].map(withCapabilities) };
     if (type === "get_state") return { sessionId: this.session.sessionId, sessionFile: this.session.sessionFile,
       isStreaming: this.busy, isCompacting: false, pendingMessageCount: 0,
-      model: this.session.launch.model.resolved, thinkingLevel: this.session.launch.thinking.resolved };
+      model: this.session.launch.model.resolved && withCapabilities(this.session.launch.model.resolved), thinkingLevel: this.session.launch.thinking.resolved };
     return super.request(type);
   }
 }
@@ -1800,11 +1801,11 @@ class FastPiActor extends FakePiActor {
       return { accepted: true };
     }
     if (type === "get_state") { if (this.failRead) throw new Error("injected state read failure");
-      return { model: this.selected(), thinkingLevel: "off", isStreaming: this.busy, isCompacting: false, pendingMessageCount: 0 }; }
+      return { model: this.selected() && withCapabilities(this.selected()), thinkingLevel: "off", isStreaming: this.busy, isCompacting: false, pendingMessageCount: 0 }; }
     if (type === "get_available_models") return { models: [
       { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-6-astra", name: "Astra", reasoning: false, contextWindow: 32000 },
       { provider: "fixture", api: "fixture-api", id: "ordinary", name: "Ordinary", reasoning: false, contextWindow: 32000 },
-    ] };
+    ].map(withCapabilities) };
     if (type === "get_entries") return { entries: [] };
     throw new Error(`unexpected Fast actor RPC ${type}`);
   }

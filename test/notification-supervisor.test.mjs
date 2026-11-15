@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fixture, delay, eventually } from "./fixtures/notification-supervisor.mjs";
+import { sessionSidecarPaths } from "../src/session-paths.mjs";
 
 test("fixture close joins concurrent startup retirement before publishing stopped state", { timeout: 180000 }, async t => {
   const launchRead = Promise.withResolvers(), releaseLaunch = Promise.withResolvers(),
@@ -148,4 +149,20 @@ test("live tool execution is not idle; dialogs reach durable feed without SSE an
   assert.equal((await f.client.request("get_notification", { id: cancel.id })).notification.state, "cancelled");
   root.emit("event", { type: "tool_execution_end", toolCallId: "live-tool", toolName: "ipython", result: { content: [] } });
   await eventually(async () => (await f.client.request("list_notifications")).notifications.some(n => n.kind === "idle"));
+});
+
+test("a test supervisor keeps the sessions it creates in its own folder and opens no inbox", async t => {
+  const saved = process.env.PI_HARNESS_INBOX_PORT;
+  // A live port in the environment must not be taken over by a test.
+  process.env.PI_HARNESS_INBOX_PORT = "1";
+  t.after(() => { if (saved === undefined) delete process.env.PI_HARNESS_INBOX_PORT; else process.env.PI_HARNESS_INBOX_PORT = saved; });
+  const f = await fixture(t);
+  assert.equal(f.supervisor.inboxAddress, null);
+  const inside = (file) => !path.relative(f.dir, file).startsWith("..") && !path.isAbsolute(path.relative(f.dir, file));
+  assert(inside(f.supervisor.coreSessionsDirectory), f.supervisor.coreSessionsDirectory);
+  const { admission } = await f.client.request("create_root", { cwd: f.dir, repositoryRoot: f.dir, name: "Contained",
+    provider: null, model: null, thinkingLevel: null });
+  const sessionFile = f.supervisor.store.getSession(admission.sessionId).sessionFile;
+  assert(inside(sessionFile), `the root's records stay in the fixture: ${sessionFile}`);
+  assert(inside(sessionSidecarPaths(sessionFile).basePath), "and so do its sidecars");
 });

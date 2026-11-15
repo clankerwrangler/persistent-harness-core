@@ -2,7 +2,7 @@
 \* Sources:
 \*   src/session-scratch.mjs sha256:a2a94a3dfd9c3e476cd845ac9cab3b3026a8d5c6e42ebe935a0f28218495cfe9
 \*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
-\*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
+\*   src/supervisor.mjs sha256:399af6a6b9ea4c75e9000de91f0ccc9af6e25d8dcf9477400229cb69d060af4e
 \*   src/process-ownership.mjs sha256:efa41d00c5b4c1bf61ca2eeff513d9c97b2ca9b794a376a32ed12a41f6d4b9d8
 \*   src/background-notifier.mjs sha256:5a196d023ebf583d7ff892c3d2ea6e648cacb21f61dff1fb5a9e103c216cc4d7
 EXTENDS FiniteSets, TLC

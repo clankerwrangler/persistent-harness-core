@@ -1,11 +1,13 @@
 ------------------------ MODULE MessageLocation ------------------------
 \* Sources:
 \*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
-\*   src/core-worker.mjs sha256:9d4cc1e0957a339276306c7aaffe806593ca2315ad0bb65c7b57731160433bfe
-\*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
-\*   src/core-transcript-reader.mjs sha256:4b2487304c758a1ac8b3a2026aa3430d95a6de56274b724272ae37316be68fa4
+\*   src/core-worker.mjs sha256:45e0bff2f093ae99c979e1e9407168ec197e16ead5751a4082d7be6ff46ba91a
+\*   src/supervisor.mjs sha256:399af6a6b9ea4c75e9000de91f0ccc9af6e25d8dcf9477400229cb69d060af4e
+\*   src/core-transcript-reader.mjs sha256:e0f42d64c659fc0ccb74e68c8d6534a938bc4d7c9c16080feecd4014315a3b66
 \*   src/input-location.mjs sha256:31cfde8719cf706fbd6266f1002783eaf127a9ee35e6cf57a2062db91a140a04
-\*   src/conversation-projection.mjs sha256:9cff939b4541fb403dd7af8947017d7c013c24e444c1a04c11b40ab9af86e503
+\*   src/conversation-projection.mjs sha256:76d0753210a8c364e3c6b0a22592f9b74cdd18a05f58ebb9f21ba32b6e8d167e
+\*   src/session-records.mjs sha256:bc1ff9ac4a91b5cd6c7a28a83f84be78b054caf65f6cf8cec48a5ed8018c09f4
+\*   bin/session-records.mjs sha256:66a7df9c543922de6bf06bc275fc77265542ccea4bac696cd98294effdeb12f5
 EXTENDS Naturals, Sequences, FiniteSets
 \* The caller supplies an already-frozen optional attachment. Browser consent,
 \* acquisition deadlines, and cancellation are not harness guarantees. The worker sends

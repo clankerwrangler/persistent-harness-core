@@ -15,6 +15,7 @@ test("derives every session-local sidecar from the session's core folder", () =>
     capabilitiesPath: `${basePath}.capabilities.json`,
     skillGrantPath: `${basePath}.skill-grant.json`,
     kernelStatePath: `${basePath}.kernel-state`,
+    pythonStepsPath: `${basePath}.python-steps.json`,
   });
   assert(Object.isFrozen(paths));
 });

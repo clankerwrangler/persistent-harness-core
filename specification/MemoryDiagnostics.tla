@@ -1,9 +1,9 @@
 -------------------- MODULE MemoryDiagnostics --------------------
 \* Sources:
-\*   src/kernel.mjs sha256:086b1e9aa5ca892fa4035a67abab043dad664b5f95ea829a01dab28f3bd525b6
-\*   src/core-worker.mjs sha256:9d4cc1e0957a339276306c7aaffe806593ca2315ad0bb65c7b57731160433bfe
-\*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
-\*   src/protocol.mjs sha256:7ba26d46123b8ba767d9255104d7ddf558c7726cacb7604e65d425749ae1ea6e
+\*   src/kernel.mjs sha256:b3a52680c0e061db087bd674a0874fcb87e1793b532cd494b58d9631c88c2063
+\*   src/core-worker.mjs sha256:45e0bff2f093ae99c979e1e9407168ec197e16ead5751a4082d7be6ff46ba91a
+\*   src/supervisor.mjs sha256:399af6a6b9ea4c75e9000de91f0ccc9af6e25d8dcf9477400229cb69d060af4e
+\*   src/protocol.mjs sha256:48b40e0384b3a637d65b909782657e23c29d57f069e09d083fb6d666306128d6
 EXTENDS Naturals, TLC
 CONSTANT IgnoreBusy, StartMissing, SkipReserve, MutateRead, BypassAuth
 VARIABLES worker, kernel, queued, draining, phase, allowed, sends, unsafe,

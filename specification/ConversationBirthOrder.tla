@@ -1,8 +1,11 @@
 ----------------------- MODULE ConversationBirthOrder -----------------------
 \* Sources:
-\*   src/conversation-projection.mjs sha256:9cff939b4541fb403dd7af8947017d7c013c24e444c1a04c11b40ab9af86e503
-\*   src/progress-projection.mjs sha256:221c8cbc55664dc7596e4f9c1538c00e2ce3b7a804a289466f89676854767d43
-\*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
+\*   src/conversation-projection.mjs sha256:76d0753210a8c364e3c6b0a22592f9b74cdd18a05f58ebb9f21ba32b6e8d167e
+\*   src/progress-projection.mjs sha256:7c1977d1717c97c90fb90bd6c6958516367957048c35862d85c591ac82702519
+\*   src/supervisor.mjs sha256:399af6a6b9ea4c75e9000de91f0ccc9af6e25d8dcf9477400229cb69d060af4e
+\*   src/live-view.mjs sha256:fa7a8846c1a485bd3f38084cd8ffe77f2c24b5066738f9ae21925d7cedd7dbf8
+\*   src/conversation-birth.mjs sha256:a2634f6138784dea843f9f0269f5e25b9db862c5c944fd443612aebedcfec402
+\*   src/pending-rows.mjs sha256:be5226e13a48758ceba2f106a7691ce14a3d1da99e0f734501f7814c0f27b8f9
 
 \* Reply text and progress headings are shown in the order they began, live and after a
 \* reload. A reply's request starts first; reasoning shown meanwhile is recorded as

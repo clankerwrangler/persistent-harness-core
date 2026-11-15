@@ -8,7 +8,7 @@
   "scripts": {
     "test": "node bin/package-load-smoke.mjs && node bin/run-tests.mjs all",
     "test:package-load": "node bin/package-load-smoke.mjs",
-    "test:p0": "node bin/run-tests.mjs all test/session-paths.test.mjs test/session-actor.test.mjs",
+    "test:p0": "node bin/run-tests.mjs all test/session-paths.test.mjs test/session-process.test.mjs",
     "test:p1": "node bin/run-tests.mjs all test/protocol.test.mjs test/store-actor.test.mjs test/supervisor-actor.test.mjs",
     "test:gate-p": "node bin/run-tests.mjs all test/e2e-persistent-sessions.test.mjs test/e2e-actor-recovery.test.mjs",
     "provision:skills": "node bin/provision-skills.mjs",

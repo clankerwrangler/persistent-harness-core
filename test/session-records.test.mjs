@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { SessionRecords } from "../src/session-records.mjs";
@@ -80,4 +80,20 @@ test("a request of another version is refused by the session half", async (t) =>
   let out = ""; child.stdout.setEncoding("utf8"); child.stdout.on("data", (text) => { out += text; });
   await new Promise((resolve) => child.once("close", resolve));
   assert.match(JSON.parse(out).message, /version 999 is not 1/);
+});
+
+test("stopping ends the reads still running before their code cache can go, and refuses later reads", async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "session-records-close-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const pidFile = path.join(dir, "pid"), script = path.join(dir, "stuck-reader.mjs");
+  await writeFile(script, `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`);
+  const records = new SessionRecords({ script });
+  const reading = records.read({ sessionFile: path.join(dir, "s"), sessionId: "s" });
+  reading.catch(() => {});
+  let pid;
+  while (!pid) { pid = Number(await readFile(pidFile, "utf8").catch(() => "")); if (!pid) await new Promise((resolve) => setTimeout(resolve, 20)); }
+  await records.close();
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "the reader has exited when close returns");
+  await assert.rejects(reading, /stopped without answering/);
+  await assert.rejects(records.read({ sessionFile: path.join(dir, "s"), sessionId: "s" }), /supervisor is stopping/);
 });

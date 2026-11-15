@@ -21,7 +21,7 @@ import { rootReminders } from "./run-reminders.mjs";
 import { CronScheduler, cronOriginPrompt } from "./cron-scheduler.mjs";
 import { CronStore } from "./cron-store.mjs";
 import { InboxStore, createInboxServer } from "./inbox.mjs";
-import { inboxOriginJobId } from "./protocol.mjs";
+import { inboxOriginJobId, normalizeProgressHeading } from "./protocol.mjs";
 import { NotificationStore, NOTIFICATION_IDLE_MS } from "./notification-store.mjs";
 import { JsonLineDecoder, encodeFrame } from "./framing.mjs";
 import { projectAvailableModels, resolveModelSelection, validateInferenceEffort } from "./inference-options.mjs";
@@ -885,7 +885,9 @@ export class HarnessSupervisor {
     if (type === "record_progress_entry") {
       const record = this.#actors.get(state.sessionId);
       if (!record || record.generation !== state.generation) return { accepted: false };
-      this.#onActorEvent(state.sessionId, record, { type: "progress_entry", entryId: params.entryId, summary: params.summary, createdAt: params.createdAt, harnessBirth: params.harnessBirth });
+      const summary = normalizeProgressHeading(params.summary);
+      if (!summary || summary !== params.summary) throw new Error("progress entry is not a normalized safe heading");
+      this.#onActorEvent(state.sessionId, record, { type: "progress_entry", entryId: params.entryId, summary, createdAt: params.createdAt, harnessBirth: params.harnessBirth });
       return { accepted: true };
     }
     if (type === "record_agent_message_entry") {
@@ -2465,7 +2467,9 @@ export class HarnessSupervisor {
       record.progressSummary = undefined;
     } else if (params.phase === "heading") {
       if (record.progressTurnId !== params.turnId) return { accepted: false };
-      if (params.summary !== record.progressSummary) { record.progressSummary = params.summary; changed = true; }
+      const normalized = normalizeProgressHeading(params.summary);
+      if (!normalized || normalized !== params.summary) throw new Error("progress heading is not a normalized safe heading");
+      if (normalized !== record.progressSummary) { record.progressSummary = normalized; changed = true; }
     } else if (params.phase === "settled") {
       if (record.progressTurnId !== params.turnId) return { accepted: false };
       changed = record.progressSummary !== undefined;
@@ -2869,11 +2873,11 @@ export class HarnessSupervisor {
   #projectActorEvent(frame) {
     const type = typeof frame?.type === "string" ? frame.type : "unknown";
     if (type === "progress_entry") {
-      // The heading arrived checked (protocol.mjs).
+      const summary = normalizeProgressHeading(frame.summary);
       const createdAt = new Date(frame.createdAt);
-      if (typeof frame.summary !== "string" || !frame.summary || typeof frame.entryId !== "string" || !frame.entryId
+      if (!summary || summary !== frame.summary || typeof frame.entryId !== "string" || !frame.entryId
         || frame.entryId.length > 128 || Number.isNaN(createdAt.valueOf())) return null;
-      return { type, entryId: frame.entryId, summary: frame.summary, createdAt: createdAt.toISOString(), ...birthOrder(frame.harnessBirth) };
+      return { type, entryId: frame.entryId, summary, createdAt: createdAt.toISOString(), ...birthOrder(frame.harnessBirth) };
     }
     if (type === "agent_message_entry") {
       const createdAt = new Date(frame.createdAt);
@@ -3020,7 +3024,8 @@ export class HarnessSupervisor {
       await Promise.all([...this.#actors.keys()].map((id) => this.#stopActor(id, "passivated"))); await Promise.all([...this.#launchPromises.values()]);
       await Promise.allSettled([...this.#actorInputWakes.values()].map((wake) => wake.done));
       await Promise.allSettled([...this.#actorActivationOwners.values()].flatMap(owners => [...owners].map(owner => owner.done)));
-      // A failed close can leave a writer; do not remove its cache.
+      // Records readers share the sessions' code cache; a failed close can leave a writer.
+      await this.transcriptReader?.close?.();
       if ([...this.#actors.values()].every(({ worker }) => worker.isRunning === false)) {
         await (await this.#actorCompileCache)?.dispose();
       }

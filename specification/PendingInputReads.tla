@@ -1,7 +1,8 @@
 ------------------------- MODULE PendingInputReads -------------------------
 \* Sources:
 \*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
-\*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
+\*   src/supervisor.mjs sha256:399af6a6b9ea4c75e9000de91f0ccc9af6e25d8dcf9477400229cb69d060af4e
+\*   src/pending-rows.mjs sha256:be5226e13a48758ceba2f106a7691ce14a3d1da99e0f734501f7814c0f27b8f9
 EXTENDS Naturals, FiniteSets, Sequences
 CONSTANTS JoinedReads, SkipNoopClear, FreshAfterAwait
 VARIABLES pending, accepted, wake, phase, kind, beforeAwait, returned, expected,

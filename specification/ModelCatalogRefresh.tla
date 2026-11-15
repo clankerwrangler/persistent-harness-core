@@ -1,7 +1,8 @@
 -------------------------- MODULE ModelCatalogRefresh --------------------------
 \* Sources:
-\*   src/core-worker.mjs sha256:9d4cc1e0957a339276306c7aaffe806593ca2315ad0bb65c7b57731160433bfe
-\*   src/host-handlers.mjs sha256:8571f6ec6f51d4ce085843d02ecdfe30d775a54ba2dceb21d67d5c230c9c5b8a
+\*   src/core-worker.mjs sha256:45e0bff2f093ae99c979e1e9407168ec197e16ead5751a4082d7be6ff46ba91a
+\*   src/host-handlers.mjs sha256:ad3ecf9ec5c1724dc4aab25ea026d4304753b7a481ca8528542192247be5cdf9
+\*   src/model-capabilities.mjs sha256:40fe62270e3ad5dc60cc341cdbb4b32a4c1fb8f5ba574c2e7f1e4f38799abbd0
 EXTENDS Naturals
 CONSTANT Requests
 VARIABLES phase, operation, outcome, result, warning, networkPolicy, deadline, selection

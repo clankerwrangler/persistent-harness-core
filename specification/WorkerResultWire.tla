@@ -1,9 +1,10 @@
 ------------------------- MODULE WorkerResultWire -------------------------
 \* Sources:
-\*   src/core-worker.mjs sha256:9d4cc1e0957a339276306c7aaffe806593ca2315ad0bb65c7b57731160433bfe
-\*   src/supervisor.mjs sha256:384e8e6655a82ea78b01116cc9d51f6c6e473bff34407eb7eaf7d45da2aca48b
+\*   src/core-worker.mjs sha256:45e0bff2f093ae99c979e1e9407168ec197e16ead5751a4082d7be6ff46ba91a
+\*   src/supervisor.mjs sha256:399af6a6b9ea4c75e9000de91f0ccc9af6e25d8dcf9477400229cb69d060af4e
+\*   src/live-view.mjs sha256:fa7a8846c1a485bd3f38084cd8ffe77f2c24b5066738f9ae21925d7cedd7dbf8
 
-\* The core worker forwards the core's events to the supervisor. Tool calls and results
+\* The session's live view (live-view.mjs) passes the core's events on to the supervisor. Tool calls and results
 \* lose their bodies on the way: the supervisor needs only which call started or ended.
 \* The worker's own handlers see each event whole, and the core saves the tool result
 \* whole, whatever is forwarded. Fault "leak" forwards bodies; "mutateCanonical" saves

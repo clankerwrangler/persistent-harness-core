@@ -1,8 +1,9 @@
 -------------------- MODULE ChildTurnFailure --------------------
 \* Sources:
-\*   src/core-worker.mjs sha256:9d4cc1e0957a339276306c7aaffe806593ca2315ad0bb65c7b57731160433bfe
+\*   src/core-worker.mjs sha256:45e0bff2f093ae99c979e1e9407168ec197e16ead5751a4082d7be6ff46ba91a
 \*   src/child-turn-failure.mjs sha256:3e70906dd488214003d4693ea887b959357b5fb2b7ee18074e6b90f5fc381fc9
 \*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
+\*   src/live-view.mjs sha256:fa7a8846c1a485bd3f38084cd8ffe77f2c24b5066738f9ae21925d7cedd7dbf8
 
 \* A session's failed turn is saved in its history first (the journal), then reported
 \* to the supervisor until a receipt comes back; an ordered witness records how far

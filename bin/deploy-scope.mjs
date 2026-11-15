@@ -6,8 +6,13 @@ import { SESSION_ENTRIES, SUPERVISOR_ENTRY, deployScope, moduleGraph } from "../
 
 const [from, to = "HEAD"] = process.argv.slice(2);
 if (!from) { console.error("usage: deploy-scope.mjs <running-commit> [<new-commit>]"); process.exit(2); }
-const git = (...args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-const reader = (revision) => (file) => { try { return git("show", `${revision}:${file}`); } catch { return null; } };
+const git = (...args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+// A file one side does not have reads as null; any other Git failure is an error.
+const ABSENT = /does not exist in|exists on disk, but not in/;
+const reader = (revision) => (file) => {
+  try { return git("show", `${revision}:${file}`); }
+  catch (error) { if (ABSENT.test(String(error.stderr))) return null; throw error; }
+};
 const changed = git("diff", "--name-only", `${from}..${to}`).split("\n").filter(Boolean);
 const supervisorFiles = new Set([...moduleGraph(SUPERVISOR_ENTRY, reader(from)), ...moduleGraph(SUPERVISOR_ENTRY, reader(to))]);
 const sessionFiles = new Set([...moduleGraph(SESSION_ENTRIES, reader(from)), ...moduleGraph(SESSION_ENTRIES, reader(to))]);

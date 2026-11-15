@@ -1,6 +1,6 @@
 ----------------------- MODULE KernelColdResidency -----------------------
 \* Sources:
-\*   src/kernel.mjs sha256:086b1e9aa5ca892fa4035a67abab043dad664b5f95ea829a01dab28f3bd525b6
+\*   src/kernel.mjs sha256:b3a52680c0e061db087bd674a0874fcb87e1793b532cd494b58d9631c88c2063
 \*   python-runtime/kernel.py sha256:d4aa99006f90d531b546686f6208dc48f77609f4faa00dabb91e7a81f80bc361
 \*   python-runtime/_cold_residency.py sha256:941b3f51b7c0ac6d80eefdd17cce1bccad2b3fd199c09edfb313b136cbe5932b
 \*   python-runtime/_linux_memory.py sha256:3469a8a6525b3866e780e501af805f8bdaaa9f34c0bdd088023f61712a2516db
