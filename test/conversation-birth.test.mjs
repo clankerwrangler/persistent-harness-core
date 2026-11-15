@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ConversationBirthClock, ConversationOrder, conversationBirth } from "../src/conversation-birth.mjs";
-import { assistantTextPart, sortVisibleHistory } from "../src/conversation-projection.mjs";
+import { ConversationBirthClock, ConversationOrder, conversationBirth, sortVisibleHistory } from "../src/conversation-birth.mjs";
+import { assistantTextPart } from "../src/conversation-projection.mjs";
 import { projectProgressEntry, PROGRESS_ENTRY_TYPE } from "../src/progress-projection.mjs";
 import { sanitizePresentationText } from "../src/presentation-directive.mjs";
 import { LiveConversation } from "../src/live-conversation.mjs";

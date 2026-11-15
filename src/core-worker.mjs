@@ -4,7 +4,8 @@
 // harness's per-session jobs around it: the Python kernel (the `ipython` tool), the
 // harness's prompt parts, registration with the supervisor, messages from other
 // sessions, progress headings, and usage reports. The supervisor talks to it over the
-// session channel (session-channel.mjs) and gets the core's own events (`core_event` frames).
+// session channel (session-channel.mjs) and gets the session's live view (`live_event` frames,
+// live-view.mjs), made here from the core's events.
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -30,6 +31,7 @@ import { inputIdForEntry } from "./conversation-projection.mjs";
 import { fastModeOptions, supportsFastMode, withCapabilities } from "./model-capabilities.mjs";
 import { MessageClock } from "./message-time.mjs";
 import { locationBlock } from "./input-location.mjs";
+import { LiveView } from "./live-view.mjs";
 import {
   INCOMING_MESSAGE_TYPE, KERNEL_SCRIPT, PYTHON_RUNTIME_SUPPORT, USAGE_ENTRY_TYPE, 
   incomingCustomPayload, nativeAsyncEnabled, pythonToolResult, skillPrompt,
@@ -40,10 +42,6 @@ const choice = (value, values, name) => {
   return value;
 };
 
-// Events the supervisor gets; the rest are the library's own business (answers, replies).
-const FORWARDED = new Set(["turn_start", "text_delta", "tool_call", "tool_result", "cancel", "message_end", "turn_end",
-  // tool_result: the core's own, for built-in calls (the worker reports its tools' results itself).
-  "settled", "error", "retry", "cut_off", "context_too_large", "window_unknown", "sign_in_needed", "context_file"]);
 
 export function parseCoreWorkerArgs(argv) {
   const options = {};
@@ -60,6 +58,8 @@ export function parseCoreWorkerArgs(argv) {
       case "--default-model": take("defaultModel"); break;
       case "--default-thinking": take("defaultThinking"); break;
       case "--name": take("name"); break;
+      // A session the user talks to: its replies' presentation directives are not shown.
+      case "--presentation": options.presentation = true; break;
       default: throw new Error(`Unknown core worker flag: ${flag}`);
     }
   }
@@ -102,6 +102,7 @@ export class CoreWorker {
     this.models = [];
     this.followUps = [];
     this.progress = new ProgressHeadingTracker();
+    this.live = new LiveView({ presentation: options.presentation === true });
     this.progressTurnId = null;
     this.progressTail = Promise.resolve();
     this.historyTail = Promise.resolve();
@@ -413,8 +414,8 @@ export class CoreWorker {
       const time = Array.isArray(result?.content) ? this.clock.toolResult() : undefined;
       return time ? { ...result, content: [...result.content, time] } : result;
     }
-    // The core reports only its built-in tools' results; the supervisor hears of these here.
-    finally { this.publish({ type: "core_event", event: { ev: "tool_result", call: event.call } }); }
+    // The core reports only its built-in tools' results; the live view hears of these here.
+    finally { for (const frame of this.live.core({ ev: "tool_result", call: event.call })) this.publish(frame); }
   }
 
   async #runTool({ call, name, arguments: args }, signal) {
@@ -615,9 +616,8 @@ export class CoreWorker {
 
   #onCoreEvent(event) {
     const model = this.model;
-    // Tool bodies stay here: the supervisor needs only which call started or ended.
-    if (FORWARDED.has(event.ev)) this.publish({ type: "core_event", event: event.ev === "tool_call" ? { ev: event.ev, call: event.call, name: event.name }
-      : event.ev === "tool_result" ? { ev: event.ev, call: event.call } : event, provider: model?.provider });
+    // What the WebUI shows of it; tool bodies and reasoning stay here.
+    for (const frame of this.live.core(event, model?.provider)) this.publish(frame);
     switch (event.ev) {
       case "tool_call": this.turnToolCalls = true; break;
       case "turn_end":

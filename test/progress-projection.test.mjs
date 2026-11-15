@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PROGRESS_ENTRY_TYPE, ProgressHeadingTracker, normalizeProgressHeading, projectProgressEntry } from "../src/progress-projection.mjs";
+import { PROGRESS_ENTRY_TYPE, ProgressHeadingTracker, projectProgressEntry } from "../src/progress-projection.mjs";
+import { normalizeProgressHeading } from "../src/protocol.mjs";
 
 const message = { role: "assistant", api: "openai-codex-responses", provider: "openai-codex", content: [] };
 

@@ -1,20 +1,9 @@
 import { birthOrder } from "./conversation-birth.mjs";
-const MAX_HEADING_CHARACTERS = 160;
-const MAX_HEADING_BYTES = 512;
+import { normalizeProgressHeading } from "./protocol.mjs";
 const MAX_PENDING_LINE_CHARACTERS = 512;
-const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
-const UNSAFE_MARKUP = /[`<>{}\[\]\p{Cf}]/u;
 const STANDALONE_HEADING = /^\s*\*\*([^*\r\n]{1,160})\*\*\s*$/u;
 
 export const PROGRESS_ENTRY_TYPE = "persistent-harness.progress-v1";
-
-export function normalizeProgressHeading(value) {
-  if (typeof value !== "string" || CONTROL.test(value)) return undefined;
-  const normalized = value.normalize("NFKC").replace(/\s+/g, " ").trim();
-  if (!normalized || [...normalized].length > MAX_HEADING_CHARACTERS || Buffer.byteLength(normalized, "utf8") > MAX_HEADING_BYTES) return undefined;
-  if (UNSAFE_MARKUP.test(normalized)) return undefined;
-  return normalized;
-}
 
 export function projectProgressEntry(entry) {
   if (entry?.type !== "custom" || entry.customType !== PROGRESS_ENTRY_TYPE

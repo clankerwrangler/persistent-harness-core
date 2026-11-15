@@ -63,6 +63,22 @@ export function actorInputCustomPayload(input, userLabel = "user") {
 }
 
 export const MAX_FRAME_BYTES = MAX_INPUT_REQUEST_BYTES;
+
+// The role clients show an input under, by where it came from.
+export const SCHEDULED_JOB_ROLE = "scheduled_job";
+export function publicInputRole(source) { return source === "cron" ? SCHEDULED_JOB_ROLE : source === "background" ? "background_notification" : "user"; }
+
+// A progress heading, as sessions report it and clients are shown it: one short line of
+// plain text. Undefined when `value` cannot be one.
+const HEADING_CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
+const HEADING_UNSAFE_MARKUP = /[`<>{}\[\]\p{Cf}]/u;
+export function normalizeProgressHeading(value) {
+  if (typeof value !== "string" || HEADING_CONTROL.test(value)) return undefined;
+  const normalized = value.normalize("NFKC").replace(/\s+/g, " ").trim();
+  if (!normalized || [...normalized].length > 160 || Buffer.byteLength(normalized, "utf8") > 512) return undefined;
+  if (HEADING_UNSAFE_MARKUP.test(normalized)) return undefined;
+  return normalized;
+}
 export const MAX_ID_LENGTH = 128;
 export const MAX_MESSAGE_BODY_BYTES = 16 * 1024;
 export const MAX_USER_INPUT_BYTES = 32 * 1024;
@@ -92,6 +108,7 @@ function string(value, path, max, { optional = false, nullable = false } = {}) {
   if (typeof value !== "string" || !value.length || value.length > max) throw new ProtocolError("invalid_request", `${path} must be a non-empty string of at most ${max} characters`);
   return value;
 }
+function heading(value, path) { const result = utf8(value, path, 512); if (normalizeProgressHeading(result) !== result) throw new ProtocolError("invalid_request", `${path} must be a normalized safe heading`); return result; }
 function utf8(value, path, max) { const result = string(value, path, max); if (Buffer.byteLength(result, "utf8") > max) throw new ProtocolError("invalid_request", `${path} must be at most ${max} UTF-8 bytes`); return result; }
 function bool(value, path) { if (typeof value !== "boolean") throw new ProtocolError("invalid_request", `${path} must be boolean`); return value; }
 function integer(value, path, min, max) { if (!Number.isInteger(value) || value < min || value > max) throw new ProtocolError("invalid_request", `${path} must be an integer from ${min} through ${max}`); return value; }
@@ -138,7 +155,7 @@ function usage(params) { const value = record(params, "params"); exact(value, ne
 function usageWindow(params) { const value = record(params, "params"); exact(value, new Set(["windowMinutes"]), "params"); return { windowMinutes: integer(value.windowMinutes, "params.windowMinutes", 1, 10_080) }; }
 function subscribe(params) { const value = record(params, "params"); exact(value, new Set(["selector", "passive"]), "params"); return { selector: string(value.selector, "params.selector", 256), passive: value.passive === undefined ? false : bool(value.passive, "params.passive") }; }
 function subscribeRootOutput(params) { const value = record(params, "params"); exact(value, new Set(["generation", "afterSeq", "invalidCursor"]), "params"); const generation = value.generation === undefined ? null : string(value.generation, "params.generation", 128); const afterSeq = value.afterSeq === undefined ? null : integer(value.afterSeq, "params.afterSeq", 0, Number.MAX_SAFE_INTEGER); const invalidCursor = value.invalidCursor === undefined ? false : bool(value.invalidCursor, "params.invalidCursor"); if (generation !== null && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(generation)) throw new ProtocolError("invalid_request", "params.generation has an invalid shape"); if (!invalidCursor && ((generation === null) !== (afterSeq === null))) throw new ProtocolError("invalid_request", "params.generation and params.afterSeq must be supplied together"); if (invalidCursor && (generation !== null || afterSeq !== null)) throw new ProtocolError("invalid_request", "invalid cursor must not include generation or afterSeq"); return invalidCursor ? { invalid: true } : generation === null ? null : { generation, afterSeq }; }
-function progressHeading(params) { const value = record(params, "params"); exact(value, new Set(["phase", "turnId", "summary"]), "params"); const phase = string(value.phase, "params.phase", 16); if (!["start", "heading", "settled"].includes(phase)) throw new ProtocolError("invalid_request", "params.phase must be start, heading, or settled"); if (phase === "heading" && value.summary === undefined) throw new ProtocolError("invalid_request", "heading progress requires params.summary"); if (phase !== "heading" && value.summary !== undefined) throw new ProtocolError("invalid_request", `${phase} progress must not include params.summary`); return { phase, turnId: string(value.turnId, "params.turnId", 128), ...(phase === "heading" ? { summary: utf8(value.summary, "params.summary", 512) } : {}) }; }
+function progressHeading(params) { const value = record(params, "params"); exact(value, new Set(["phase", "turnId", "summary"]), "params"); const phase = string(value.phase, "params.phase", 16); if (!["start", "heading", "settled"].includes(phase)) throw new ProtocolError("invalid_request", "params.phase must be start, heading, or settled"); if (phase === "heading" && value.summary === undefined) throw new ProtocolError("invalid_request", "heading progress requires params.summary"); if (phase !== "heading" && value.summary !== undefined) throw new ProtocolError("invalid_request", `${phase} progress must not include params.summary`); return { phase, turnId: string(value.turnId, "params.turnId", 128), ...(phase === "heading" ? { summary: heading(value.summary, "params.summary") } : {}) }; }
 function progressEntry(params) {
   const value = record(params, "params");
   exact(value, new Set(["entryId", "summary", "createdAt", "harnessBirth"]), "params");
@@ -146,7 +163,7 @@ function progressEntry(params) {
   if (Number.isNaN(Date.parse(createdAt))) throw new ProtocolError("invalid_request", "params.createdAt must be an ISO timestamp");
   const birth = conversationBirth(value.harnessBirth);
   if (value.harnessBirth !== undefined && !birth) throw new ProtocolError("invalid_request", "params.harnessBirth must be a bounded conversation birth");
-  return { entryId: string(value.entryId, "params.entryId", 128), summary: utf8(value.summary, "params.summary", 512), createdAt,
+  return { entryId: string(value.entryId, "params.entryId", 128), summary: heading(value.summary, "params.summary"), createdAt,
     ...(birth ? { harnessBirth: birth } : {}) };
 }
 function agentMessageEntry(params) {

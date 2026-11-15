@@ -16,6 +16,7 @@ import { actorInputCustomPayload, ACTOR_INPUT_COMMAND } from "../src/protocol.mj
 import { createRootTitleGenerator } from "../src/root-title-generator.mjs";
 import { SessionProcess } from "../src/session-process.mjs";
 import { HarnessSupervisor, fileSessions } from "./fixtures/isolated-supervisor.mjs";
+import { liveFrame } from "./fixtures/live-session.mjs";
 import { HomeFailureNudge } from "../src/home-failure-nudge.mjs";
 import { discoverSkills, skillCatalogForSkills } from "../src/skills.mjs";
 import { sessionSidecarPaths } from "../src/session-paths.mjs";
@@ -560,7 +561,8 @@ test("parent actor reconnect requests pending child creation history without tou
 class FakePiActor extends EventEmitter {
   constructor(options) { super(); this.session = options.session; this.pid = process.pid; this.isRunning = false; this.streaming = false; this.submits = []; this.requests = []; this.submitHold = null; this.submitEntered = 0; }
   async start() { this.isRunning = true; return { sessionId: this.session.sessionId, sessionFile: this.session.sessionFile, isStreaming: false, model: null, thinkingLevel: "off" }; }
-  emit(name, value) { if (name === "event" && value?.type === "agent_start") this.streaming = true; if (name === "event" && value?.type === "agent_settled") this.streaming = false; return super.emit(name, value); }
+  emit(name, value) { if (name === "event" && value?.type === "agent_start") this.streaming = true; if (name === "event" && value?.type === "agent_settled") this.streaming = false;
+    if (name === "event") { value = liveFrame(this, value); if (!value) return false; } return super.emit(name, value); }
   async request(type, fields = {}) {
     this.requests.push(type);
     if (type === "get_state") return { sessionId: this.session.sessionId, sessionFile: this.session.sessionFile, isStreaming: this.streaming, model: null, thinkingLevel: "off" };

@@ -1,13 +1,12 @@
-import { birthOrder, timelineSequence } from "./conversation-birth.mjs";
+import { birthOrder } from "./conversation-birth.mjs";
 import { normalizeInputLocation } from "./input-location.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { ACTOR_INPUT_MESSAGE_TYPE, actorInputCustomPayload, actorInputDigest } from "./protocol.mjs";
+import { ACTOR_INPUT_MESSAGE_TYPE, actorInputCustomPayload, actorInputDigest, publicInputRole } from "./protocol.mjs";
 import { normalizeInputImages } from "./input-images.mjs";
 import { sanitizePresentationText } from "./presentation-directive.mjs";
 
 const TRAILING_INPUT_MARKER = /\n\n<!-- persistent-harness-input:([^>\s]{1,128}) -->$/;
-export const SCHEDULED_JOB_ROLE = "scheduled_job";
 
 // Text the worker added for the model only (a message's time, a shared location):
 // part of the saved context, never shown.
@@ -209,15 +208,6 @@ export function associateVisibleInput(message, entry, association) {
     ...(proof.clientMessageId ? { clientMessageId: proof.clientMessageId } : {}) };
 }
 
-export function publicInputRole(source) { return source === "cron" ? SCHEDULED_JOB_ROLE : source === "background" ? "background_notification" : "user"; }
-
-export function pendingInputMessage(input) {
-  return { id: input.inputId, role: publicInputRole(input.source), text: input.message ?? "",
-    createdAt: iso(input.acceptedAt ?? input.createdAt), status: "complete", delivery: input.delivery,
-    source: input.source, origin: input.origin, behavior: input.behavior, ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
-    ...(input.images?.length ? { images: input.images.map((image, index) => ({ type: "image", mimeType: image.mimeType,
-      ref: { entryId: input.inputId, index }, contentHash: imageContentHash(image), size: Buffer.from(image.data, "base64").length })) } : {}) };
-}
 export function projectVisibleMessage(entry, { streaming = false, imageReferences = false, sanitizePresentation = false,
   inputAssociation, canonicalEntries, sessionId, inputReceipt, allowToolImages = false } = {}) {
   const association = inputAssociation ?? (inputReceipt ? resolveActorInputAssociation(canonicalEntries ?? [entry],
@@ -295,13 +285,4 @@ export function assistantMessageParts(entry, options = {}) {
   if (entry?.type !== "message" || entry.message?.role !== "assistant" || !Array.isArray(entry.message.content)) return [];
   return entry.message.content.map((_part, index) => assistantTextPart(entry.message, index,
     { ...options, entryId: entry.id, timestamp: entry.timestamp })).filter((part) => part?.text);
-}
-
-export function sortVisibleHistory(items) {
-  return items.sort((left, right) => {
-    const row = item => item.kind === "message" ? item.message : item;
-    const a = Date.parse(row(left).createdAt), b = Date.parse(row(right).createdAt);
-    return Number.isFinite(a) && Number.isFinite(b) ? a - b
-      || timelineSequence(row(left).timelineSequence) - timelineSequence(row(right).timelineSequence) : 0;
-  });
 }

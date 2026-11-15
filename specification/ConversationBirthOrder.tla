@@ -8,7 +8,7 @@
 \* reload. A reply's request starts first; reasoning shown meanwhile is recorded as
 \* headings; each text's first words come later. The core saves a heading with when it
 \* was recorded and a text with when its first words arrived (startedAt); the live view
-\* times a text row when those words reach the supervisor, before any later row begins.
+\* times a text row when those words reach the session half, before any later row begins.
 \* Times only move forward; rows begun in the same millisecond keep history order, which
 \* is the order they began. RequestStart = TRUE is the broken control that shows saved
 \* text at its request's start.

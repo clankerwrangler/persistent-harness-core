@@ -114,8 +114,9 @@ test("tool events reach the supervisor without their arguments or results", asyn
   await worker.start();
   core.emit("event", { ev: "tool_call", call: "c1", name: "read", arguments: { path: "x".repeat(100_000) }, async: false, builtin: true });
   core.emit("event", { ev: "tool_result", call: "c1", result: { content: [{ type: "text", text: "y".repeat(100_000) }] } });
-  const events = published.filter((frame) => frame.type === "core_event").map((frame) => frame.event);
-  assert.deepEqual(events, [{ ev: "tool_call", call: "c1", name: "read" }, { ev: "tool_result", call: "c1" }]);
+  const events = published.filter((frame) => frame.type === "live_event").map((frame) => frame.event);
+  assert.deepEqual(events, [{ type: "tool_execution_start", toolCallId: "c1", toolName: "read" }, { type: "tool_execution_end", toolCallId: "c1" }]);
+  assert.doesNotMatch(JSON.stringify(published), /xxxx|yyyy/);
   await worker.close();
 });
 

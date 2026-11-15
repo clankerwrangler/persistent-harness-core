@@ -8,9 +8,10 @@ import { promisify } from "node:util";
 import { normalizeInputImages } from "./input-images.mjs";
 import {
   assistantMessageParts, associateVisibleInput, createActorInputAssociation, inputIdForEntry,
-  projectVisibleMessage, sortVisibleHistory, toolResultImages,
+  projectVisibleMessage, toolResultImages,
 } from "./conversation-projection.mjs";
-import { projectAgentMessageEntry, selectIncomingFamilyMessages } from "./agent-message-projection.mjs";
+import { projectAgentMessageEntry, projectAgentMessageHistoryMessage, selectIncomingFamilyMessages } from "./agent-message-projection.mjs";
+import { sortVisibleHistory } from "./conversation-birth.mjs";
 import { projectProgressEntry } from "./progress-projection.mjs";
 import { boundVisibleHistory } from "./visible-page.mjs";
 import { PRESENTATION_HISTORY_PREFIX, sanitizePresentationText } from "./presentation-directive.mjs";
@@ -149,7 +150,7 @@ export class CoreTranscriptReader {
     for (const item of items) {
       if (item.kind !== "agent_message" || item.direction !== "from" || !item.familyMessageId) continue;
       if (familyMessageId && item.familyMessageId !== familyMessageId) continue;
-      familyMessages[item.familyMessageId] = familyDeliveryOnly ? { delivery: item.delivery } : item;
+      familyMessages[item.familyMessageId] = familyDeliveryOnly ? { delivery: item.delivery } : projectAgentMessageHistoryMessage(item);
     }
     const proven = [...associations].filter(([, result]) => result.state === "proven");
     // The core's history has one line that only grows, so a session has one fixed branch id

@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { HarnessClient } from "../src/client.mjs";
 import { HarnessSupervisor } from "./fixtures/isolated-supervisor.mjs";
+import { liveFrame } from "./fixtures/live-session.mjs";
 import { actorInputCustomPayload } from "../src/protocol.mjs";
 import { CoreTranscriptReader } from "../src/core-transcript-reader.mjs";
 
@@ -28,7 +29,8 @@ class CronFakeActor extends EventEmitter {
     this.isRunning = true; return this.#state();
   }
   emit(name, value) { if (name === "event" && value?.type === "agent_start") this.streaming = true;
-    if (name === "event" && value?.type === "agent_settled") this.streaming = false; return super.emit(name, value); }
+    if (name === "event" && value?.type === "agent_settled") this.streaming = false;
+    if (name === "event") { value = liveFrame(this, value); if (!value) return false; } return super.emit(name, value); }
   async request(type, params = {}) {
     // A cron input arrives as deliver_input, as the core worker receives it.
     if (type === "deliver_input") {

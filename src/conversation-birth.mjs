@@ -56,3 +56,14 @@ export class ConversationOrder {
     return result;
   }
 }
+
+/** Rows (`{kind: "message", message}` or rows of their own) in the order they are shown:
+ * by time, then by birth sequence. Sorts in place. */
+export function sortVisibleHistory(items) {
+  return items.sort((left, right) => {
+    const row = item => item.kind === "message" ? item.message : item;
+    const a = Date.parse(row(left).createdAt), b = Date.parse(row(right).createdAt);
+    return Number.isFinite(a) && Number.isFinite(b) ? a - b
+      || timelineSequence(row(left).timelineSequence) - timelineSequence(row(right).timelineSequence) : 0;
+  });
+}

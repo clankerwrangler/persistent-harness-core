@@ -8,6 +8,7 @@ import test from "node:test";
 import { HarnessClient } from "../src/client.mjs";
 import { SessionProcess } from "../src/session-process.mjs";
 import { HarnessSupervisor } from "./fixtures/isolated-supervisor.mjs";
+import { liveFrame } from "./fixtures/live-session.mjs";
 import { PythonRuntimeManager } from "../src/python-runtime.mjs";
 import { CoreTranscriptReader } from "../src/core-transcript-reader.mjs";
 import { coreSessionHistory } from "../src/core-transcript-reader.mjs";
@@ -28,6 +29,7 @@ class Actor extends EventEmitter {
   emit(name, event) {
     if (name === "event" && event.type === "agent_start") this.streaming = true;
     if (name === "event" && event.type === "agent_settled") this.streaming = false;
+    if (name === "event") { event = liveFrame(this, event); if (!event) return false; }
     return super.emit(name, event);
   }
   async request(type) {
@@ -166,7 +168,7 @@ test("real core writer stays stopped after held settled readiness and resumes on
   const f = await fixture(t, { real: true });
   await f.client.request("submit_input", { sessionId: f.sessionId, message: "Complete the private stop proof.", behavior: "auto" });
   await f.providerEntered.promise; await f.changeSkills(); f.providerRelease.resolve(); await f.entered.promise;
-  assert(f.rawEvents.some((event) => event.type === "core_event" && event.event?.ev === "settled"));
+  assert(f.rawEvents.some((event) => event.type === "live_event" && event.event?.type === "agent_settled"));
   let acknowledged = false; const stop = f.client.request("stop_session", { sessionId: f.sessionId }).then((reply) => { acknowledged = true; return reply; });
   await f.client.request("heartbeat"); assert.equal(acknowledged, false);
   f.releaseReadiness(); assert.equal((await stop).session.lifecycle, "stopped");
@@ -177,7 +179,7 @@ test("real core writer stays stopped after held settled readiness and resumes on
   await f.client.request("revive_session", { sessionId: f.sessionId });
   await until(() => f.supervisor.store.getSession(f.sessionId).lifecycle === "resident", "real explicit activation");
   assert(f.supervisor.store.getSession(f.sessionId).actorGeneration > generation);
-  assert.equal(f.rawEvents.filter((event) => event.type === "core_event" && event.event?.ev === "turn_start").length, 1, "Revival does not fabricate another prompt");
+  assert.equal(f.rawEvents.filter((event) => event.type === "live_activity" || event.type === "live_event" && event.event?.type === "agent_start").length, 1, "Revival does not fabricate another prompt");
 });
 
 for (const freshInput of [false, true]) test(`settled readiness fences an exited empty actor${freshInput ? " but preserves fresh arrival" : " without revival"}`, { timeout: 1080000 }, async (t) => {

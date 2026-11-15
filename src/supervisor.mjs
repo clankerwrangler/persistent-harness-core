@@ -2,7 +2,7 @@ import { closestThinkingLevel, readDefaultInference, readDefaultModel, resolveDe
 import { quiescentScratchProcessRoots } from "./process-ownership.mjs";
 import { DEFAULT_SCRATCH_DIRECTORY, ensureSessionScratch, reclaimSessionScratch } from "./session-scratch.mjs";
 import { nodeMemoryDiagnostics, workerMemoryDiagnostics } from "./memory-diagnostics.mjs";
-import { birthOrder } from "./conversation-birth.mjs";
+import { birthOrder, sortVisibleHistory } from "./conversation-birth.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, link, lstat, mkdir, readFile, readlink, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -11,12 +11,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveChildLaunchPolicy } from "./child-policy.mjs";
-import {
-  assistantTurnFailureFromEvents, captureAssistantTurn, resetAssistantTurn,
-} from "./child-task-failure.mjs";
 import { LiveConversation } from "./live-conversation.mjs";
-import { pendingFamilyMessage, projectAgentMessageHistoryMessage } from "./agent-message-projection.mjs";
-import { assistantTextPart, sortVisibleHistory, pendingInputMessage } from "./conversation-projection.mjs";
+import { pendingFamilyMessage, pendingInputMessage } from "./pending-rows.mjs";
 import { BackgroundCompletionMonitor, defaultBackgroundJobsDirectory } from "./background-notifier.mjs";
 import { CoreReaper } from "./core-reaper.mjs";
 import { normalizeCronLaunch } from "./cron-launch.mjs";
@@ -40,8 +36,6 @@ import { actorInputDigest, actorInputPrompt,
   validateRequest,
 } from "./protocol.mjs";
 import { captureOwnedProcessIdentity, terminateOwnedProcess } from "./process-ownership.mjs";
-import { normalizeProgressHeading } from "./progress-projection.mjs";
-import { PresentationDirectiveFilter, sanitizePresentationText } from "./presentation-directive.mjs";
 import { RootOutputProjector } from "./root-output-projector.mjs";
 import { coreSessionContext, createCoreSession, forkableContext, removeCoreSession } from "./core-session.mjs";
 import { agentDirectory, coreSessionsDirectory } from "./core-layout.mjs";
@@ -74,13 +68,6 @@ const ACTOR_CONNECTION_STATE_TIMEOUT_MS = 1000;
 export function socketOutputBufferLimit(maxFrameBytes = MAX_FRAME_BYTES) {
   // Reserve one full legal frame, including its newline, plus bounded small-frame traffic.
   return maxFrameBytes + 1 + SOCKET_OUTPUT_HEADROOM_BYTES;
-}
-
-// A reply being streamed by the core, as the message it will be saved as (so far).
-/** A reply being streamed, as a message: one text part per text item the provider sent. */
-function coreReplyMessage(reply) {
-  return { role: "assistant", provider: reply.provider, timestamp: reply.timestamp,
-    content: reply.parts.map((part) => ({ type: "text", text: part.text, startedAt: part.startedAt, ...(part.signature ? { textSignature: part.signature } : {}) })) };
 }
 
 function requestFailure(code, message) { const error = new Error(message); error.code = code; return error; }
@@ -898,9 +885,7 @@ export class HarnessSupervisor {
     if (type === "record_progress_entry") {
       const record = this.#actors.get(state.sessionId);
       if (!record || record.generation !== state.generation) return { accepted: false };
-      const summary = normalizeProgressHeading(params.summary);
-      if (!summary || summary !== params.summary) throw new Error("progress entry is not a normalized safe heading");
-      this.#onActorEvent(state.sessionId, record, { type: "progress_entry", entryId: params.entryId, summary, createdAt: params.createdAt, harnessBirth: params.harnessBirth });
+      this.#onActorEvent(state.sessionId, record, { type: "progress_entry", entryId: params.entryId, summary: params.summary, createdAt: params.createdAt, harnessBirth: params.harnessBirth });
       return { accepted: true };
     }
     if (type === "record_agent_message_entry") {
@@ -2171,6 +2156,7 @@ export class HarnessSupervisor {
         ...(fallback.thinkingLevel ? ["--default-thinking", fallback.thinkingLevel] : []));
     }
     args.push("--name", session.name);
+    if (session.kind === "root" && session.depth === 0) args.push("--presentation");
     return args;
   }
   #actorEnv(session, compileCache, generationSkillGrantPath, scratch) {
@@ -2206,7 +2192,7 @@ export class HarnessSupervisor {
       shutdownTimeoutMs: this.actorShutdownTimeoutMs, session });
     const record = { worker, generation: session.actorGeneration, rootOutputSession: Object.freeze({ sessionId: session.sessionId, kind: session.kind, depth: session.depth }), expectedLifecycle: null, exitError: null, eventSeq: 0, eventRing: [], eventRingBytes: 0, progressSummary: undefined, progressTurnId: null,
       skillGrantFingerprint: skillGrant.fingerprint, skillGrantSkills: skillGrant.skills, skillRefreshPending: false,
-      notificationWork: new Set(), messageTransportRepairAttempted: false, presentationFilters: new Map(), liveConversation: new LiveConversation(), assistantMessageIdentity: null, assistantTextIds: new Map() }; this.#actors.set(sessionId, record);
+      notificationWork: new Set(), messageTransportRepairAttempted: false, liveConversation: new LiveConversation() }; this.#actors.set(sessionId, record);
     worker.on("event", (frame) => this.#onActorEvent(sessionId, record, frame)); worker.on("protocolError", (error) => this.logger.error?.(`actor ${sessionId} RPC protocol error: ${error.message}`)); worker.on("exit", (details) => this.#onActorExit(sessionId, record, details));
     try {
       const state = await worker.start();
@@ -2274,7 +2260,7 @@ export class HarnessSupervisor {
       inputProofIds: [], familyMessageId: messageId });
     const canonical = transcript.familyMessages?.[messageId];
     const route = this.store.getMessage(messageId);
-    const message = canonical?.delivery?.state === "delivered" ? projectAgentMessageHistoryMessage(canonical)
+    const message = canonical?.delivery?.state === "delivered" ? canonical
       : route && ["accepted", "queued", "delivered"].includes(route.state) ? this.#pendingFamilyPresentation(route) : undefined;
     if (message) this.#publishInputState(sessionId, message);
   }
@@ -2479,9 +2465,7 @@ export class HarnessSupervisor {
       record.progressSummary = undefined;
     } else if (params.phase === "heading") {
       if (record.progressTurnId !== params.turnId) return { accepted: false };
-      const normalized = normalizeProgressHeading(params.summary);
-      if (!normalized || normalized !== params.summary) throw new Error("progress heading is not a normalized safe heading");
-      if (normalized !== record.progressSummary) { record.progressSummary = normalized; changed = true; }
+      if (params.summary !== record.progressSummary) { record.progressSummary = params.summary; changed = true; }
     } else if (params.phase === "settled") {
       if (record.progressTurnId !== params.turnId) return { accepted: false };
       changed = record.progressSummary !== undefined;
@@ -2492,100 +2476,39 @@ export class HarnessSupervisor {
     return { accepted: true };
   }
 
-  // The core's own events (the worker forwards them as `core_event`). They drive the
-  // session's activity, notifications and failure capture, and the live view: streamed
-  // text is shown under the id its saved message will have, so the two meet.
-  #onCoreEvent(sessionId, record, ev, provider) {
-    const publish = (event) => this.#onActorEvent(sessionId, record, event);
-    switch (ev?.ev) {
-      case "turn_start":
-        // A chain of turns (messages that arrived meanwhile) is one working stretch.
-        if (record.coreWorking) { this.store.recordSessionActivity(sessionId); return; }
-        record.coreWorking = true;
-        publish({ type: "agent_start" });
-        return;
-      case "text_delta": {
-        if (typeof ev.delta !== "string") return;
-        const item = typeof ev.item === "string" && ev.item ? ev.item : undefined;
-        let reply = record.coreReply;
-        if (reply?.attempt !== ev.attempt) reply = record.coreReply = { attempt: ev.attempt, parts: [], timestamp: Date.now(), provider };
-        let index = reply.parts.length - 1;
-        // A new text item from the provider is a new part, as it will be once saved.
-        if (index < 0 || (item !== undefined && reply.parts[index].item !== item)) {
-          if (index >= 0) publish({ type: "message_update", message: coreReplyMessage(reply), assistantMessageEvent: { type: "text_end", contentIndex: index, text: reply.parts[index].text } });
-          // The saved text keeps the provider's item id in its signature; naming the live
-          // text the same way gives it the id its saved message will have.
-          // Each part shows at the time its first words arrived, as the core saves it.
-          reply.parts.push({ item, text: "", startedAt: Date.now(), signature: item ? JSON.stringify({ v: 1, id: item }) : undefined });
-          index += 1;
-          publish({ type: "message_update", message: coreReplyMessage(reply), assistantMessageEvent: { type: "text_start", contentIndex: index } });
-        }
-        reply.parts[index].text += ev.delta;
-        publish({ type: "message_update", message: coreReplyMessage(reply), assistantMessageEvent: { type: "text_delta", contentIndex: index, delta: ev.delta } });
-        return;
-      }
-      case "message_end": {
-        const reply = record.coreReply?.attempt === ev.attempt ? record.coreReply : null;
-        record.coreReply = null;
-        const last = reply ? reply.parts.length - 1 : -1;
-        if (last >= 0) publish({ type: "message_update", message: coreReplyMessage(reply), assistantMessageEvent: { type: "text_end", contentIndex: last, text: reply.parts[last].text } });
-        const message = { ...(reply ? coreReplyMessage(reply) : { role: "assistant", content: [], timestamp: Date.now() }), stopReason: ev.stopReason, usage: ev.usage };
-        publish({ type: "message_end", message });
-        // A live row the provider gave no id cannot meet its saved message: drop it once saved.
-        reply?.parts.forEach((part, index) => {
-          if (part.signature) return;
-          const shown = assistantTextPart(message, index);
-          if (shown) record.liveConversation.remove(shown.id);
-        });
-        return;
-      }
-      case "error":
-        // A failed reply is saved (n) and ends the turn's work with this error.
-        if (ev.n != null) captureAssistantTurn(record, { role: "assistant", stopReason: "error", errorMessage: ev.error, content: [] });
-        return;
-      case "tool_call": publish({ type: "tool_execution_start", toolCallId: ev.call, toolName: ev.name }); return;
-      case "tool_result": publish({ type: "tool_execution_end", toolCallId: ev.call }); return;
-      case "cancel": for (const call of ev.calls ?? []) publish({ type: "tool_execution_end", toolCallId: call }); return;
-      case "settled":
-        if (!record.coreWorking) return;
-        record.coreWorking = false;
-        publish({ type: "agent_settled" });
-        return;
-      default: return;
-    }
-  }
-
+  // A session's frames. Its live view (`live_event`, made by the session half: live-view.mjs)
+  // is numbered, kept for replay and passed on as it is, with its reply-feed part (`feed`)
+  // to the root output; its kind drives the session's activity, notifications and failure
+  // capture. The supervisor's own events about the session (progress, agent messages,
+  // children) and the session's dialogs and model changes are shaped here.
   #onActorEvent(sessionId, record, frame) {
     if (this.#actors.get(sessionId) !== record) return;
-    if (frame?.type === "core_event") return this.#onCoreEvent(sessionId, record, frame.event, frame.provider);
-    if (frame?.type === "agent_start") {
+    // A turn chained onto a working stretch.
+    if (frame?.type === "live_activity") { this.store.recordSessionActivity(sessionId); return; }
+    const live = frame?.type === "live_event";
+    const shown = live ? (frame.event && typeof frame.event === "object" ? frame.event : null) : this.#boundedActorEvent(frame);
+    const type = live ? shown?.type : undefined;
+    if (type === "agent_start") {
       this.#cancelHistoryMaintenance(sessionId);
       this.#cancelIdlePreparation(sessionId, record);
       record.eventRing = []; record.eventRingBytes = 0;
       record.progressSummary = undefined;
-      resetAssistantTurn(record);
-    } else if (frame?.type === "message_end" && frame.message?.role === "assistant") {
-      captureAssistantTurn(record, frame.message);
-      if (frame.message.content?.some((part) => part?.type === "text" && part.text?.trim())) {
-        setImmediate(() => void this.#maybeAutoTitleRoot(sessionId));
-      }
-    } else if (frame?.type === "agent_settled") {
+    } else if (type === "agent_settled") {
       record.progressSummary = undefined;
       record.progressTurnId = null;
       if (sessionId === this.#homeSessionId()) this.#homeNudge.settled();
     }
-    const retained = this.#boundedActorEvent(frame, record); let visibleRetained = retained;
-    if (retained) {
+    let visible = null;
+    if (live || shown) {
       record.eventSeq += 1;
-      this.#rootOutput.accept({ session: record.rootOutputSession, actorGeneration: record.generation, actorEventSeq: record.eventSeq, event: retained });
-      visibleRetained = this.#sanitizeRootActorEvent(record, retained);
-      if (visibleRetained) {
-        visibleRetained = record.liveConversation.accept(visibleRetained);
-        if (visibleRetained.type === "message_update" && visibleRetained.assistantMessageEvent?.type === "text_end") {
+      if (live && frame.feed) this.#rootOutput.accept({ session: record.rootOutputSession, actorGeneration: record.generation, actorEventSeq: record.eventSeq, event: frame.feed });
+      if (shown) {
+        visible = record.liveConversation.accept(shown);
+        if (visible.type === "message_update" && visible.assistantMessageEvent?.type === "text_end") {
           setImmediate(() => void this.#maybeAutoTitleRoot(sessionId));
         }
-        const retainedBytes = Buffer.byteLength(JSON.stringify(visibleRetained));
-        record.eventRing.push({ seq: record.eventSeq, event: visibleRetained, retainedBytes });
+        const retainedBytes = Buffer.byteLength(JSON.stringify(visible));
+        record.eventRing.push({ seq: record.eventSeq, event: visible, retainedBytes });
         record.eventRingBytes += retainedBytes;
         while (record.eventRing.length > 128 || record.eventRingBytes > 256 * 1024) {
           record.eventRingBytes -= record.eventRing.shift().retainedBytes;
@@ -2597,20 +2520,24 @@ export class HarnessSupervisor {
         if (this.store.recordSessionInferenceResult(sessionId, record.generation, { requestId: frame.requestId,
           selection: frame.selection, ...(frame.type === "inference_selection_failed" ? { error: true } : {}) })) this.#broadcastNavigator("inference_changed");
       }
-      if (["agent_start", "tool_execution_start", "tool_execution_end"].includes(frame?.type)
-        || frame?.type === "message_end" && frame.message?.role === "assistant") this.store.recordSessionActivity(sessionId);
+      const reply = type === "message_end" && shown.message?.role === "assistant";
+      if (["agent_start", "tool_execution_start", "tool_execution_end"].includes(type) || reply) this.store.recordSessionActivity(sessionId);
+      if (reply && shown.message.content?.some((part) => part?.type === "text" && part.text?.trim())) {
+        setImmediate(() => void this.#maybeAutoTitleRoot(sessionId));
+      }
       if (["progress_entry", "agent_message_entry", "child_creation_entry"].includes(frame?.type)) {
         const createdAt = Date.parse(frame.createdAt);
         if (Number.isSafeInteger(createdAt) && createdAt >= 0) this.store.recordSessionActivity(sessionId, createdAt);
       }
-      if (frame?.type === "tool_execution_start" && typeof frame.toolCallId === "string") record.notificationWork.add(`tool:${frame.toolCallId}`);
-      if (frame?.type === "tool_execution_end") record.notificationWork.delete(`tool:${frame.toolCallId}`);
-      if (["tool_execution_start", "tool_execution_end"].includes(frame?.type)) {
+      if (type === "tool_execution_start" && typeof shown.toolCallId === "string") record.notificationWork.add(`tool:${shown.toolCallId}`);
+      if (type === "tool_execution_end") record.notificationWork.delete(`tool:${shown.toolCallId}`);
+      if (["tool_execution_start", "tool_execution_end"].includes(type)) {
         this.#observeNotifications(sessionId); this.#syncPassivationTimer(sessionId);
       }
-      if (frame?.type === "agent_start") this.store.setActorActivity(sessionId, record.generation, true);
-      else if (frame?.type === "agent_settled") {
-        const failure = this.store.submittedChildTask?.(sessionId) ? assistantTurnFailureFromEvents(record) : null;
+      if (type === "agent_start") this.store.setActorActivity(sessionId, record.generation, true);
+      else if (type === "agent_settled") {
+        // The session half says why the turn failed (live-view.mjs), if it did.
+        const failure = this.store.submittedChildTask?.(sessionId) && typeof frame.failure === "string" ? frame.failure : null;
         this.store.completeSubmittedChildTask?.(sessionId, failure);
         if (failure) this.store.recordSessionLastError?.(sessionId, record.generation, failure);
         this.store.setActorActivity(sessionId, record.generation, false);
@@ -2629,15 +2556,17 @@ export class HarnessSupervisor {
           setImmediate(() => this.#retryQueuedMessages(sessionId));
         }
       }
-      if (frame?.type === "agent_start" || frame?.type === "agent_settled") { this.#observeNotifications(sessionId); this.#syncPassivationTimers(); }
+      if (type === "agent_start" || type === "agent_settled") { this.#observeNotifications(sessionId); this.#syncPassivationTimers(); }
     } catch (error) { this.logger.error?.(`actor ${sessionId} event failed: ${error instanceof Error ? error.message : String(error)}`); }
-    if (visibleRetained) {
+    if (visible) {
       const subscribers = [...this.#clientConnections].filter((client) => client.subscriptions.has(sessionId));
-      const dialog = visibleRetained.type === "dialog_request" && ["select", "confirm", "input", "editor"].includes(visibleRetained.method);
-      const recipients = dialog && !this.#trackDialogRequest(sessionId, record, visibleRetained) ? [] : dialog ? subscribers.slice(0, 1) : subscribers;
-      this.#broadcast(recipients, event("actor_event", { sessionId, actorGeneration: record.generation, seq: record.eventSeq, event: visibleRetained }));
+      const dialog = visible.type === "dialog_request" && ["select", "confirm", "input", "editor"].includes(visible.method);
+      const recipients = dialog && !this.#trackDialogRequest(sessionId, record, visible) ? [] : dialog ? subscribers.slice(0, 1) : subscribers;
+      this.#broadcast(recipients, event("actor_event", { sessionId, actorGeneration: record.generation, seq: record.eventSeq, event: visible }));
     }
-    if (["agent_start", "agent_settled"].includes(frame?.type)) this.#broadcastNavigator(frame.type);
+    // Live rows that will never meet a saved message (live-view.mjs says which).
+    if (live && Array.isArray(frame.drop)) for (const id of frame.drop) if (typeof id === "string") record.liveConversation.remove(id);
+    if (type === "agent_start" || type === "agent_settled") this.#broadcastNavigator(type);
   }
   #onActorExit(sessionId, record, details) {
     this.#cancelIdlePreparation(sessionId, record);
@@ -2930,117 +2859,21 @@ export class HarnessSupervisor {
     }
   }
 
-  #sanitizeRootActorEvent(record, event) {
-    if (record.rootOutputSession?.kind !== "root" || record.rootOutputSession?.depth !== 0) return event;
-    if (event.type === "agent_start" || event.type === "agent_settled") { record.presentationFilters.clear(); return event; }
-    if (event.type === "message_update") {
-      const update = event.assistantMessageEvent;
-      if (update?.type === "text_start") record.presentationFilters.set(event.messageId, new PresentationDirectiveFilter());
-      if (update?.type === "text_delta") {
-        let filter = record.presentationFilters.get(event.messageId);
-        if (!filter) { filter = new PresentationDirectiveFilter(); record.presentationFilters.set(event.messageId, filter); }
-        const delta = filter.push(update.delta); if (!delta) return null;
-        return { ...event, assistantMessageEvent: { ...update, delta } };
-      }
-      if (update?.type === "text_end") {
-        record.presentationFilters.delete(event.messageId);
-        return { ...event, assistantMessageEvent: { ...update, text: sanitizePresentationText(update.text ?? "").text } };
-      }
-    }
-    if (event.type === "message_end" && event.message?.role === "assistant") {
-      const content = event.message.content.map((part) => ({ ...part, text: sanitizePresentationText(part.text).text }));
-      for (const part of content) record.presentationFilters.delete(part.id);
-      return { ...event, message: { ...event.message, content } };
-    }
-    return event;
-  }
-
-  #boundedActorEvent(frame, record) {
-    const projected = this.#projectActorEvent(frame, record);
+  // A frame that is not the live view, as clients are shown it: at most 32 KB.
+  #boundedActorEvent(frame) {
+    const projected = this.#projectActorEvent(frame);
     if (!projected) return null;
-    try {
-      if (Buffer.byteLength(JSON.stringify(projected)) <= 32 * 1024) return projected;
-      if (projected.type === "message_end" && projected.message?.role === "assistant") {
-        return { ...projected, message: { ...projected.message, content: projected.message.content.map((part) => ({ ...part, text: "" })) }, truncated: true };
-      }
-      if (projected.type === "message_update" && projected.assistantMessageEvent?.type === "text_end") {
-        return { ...projected, assistantMessageEvent: { ...projected.assistantMessageEvent, text: "" }, truncated: true };
-      }
-      return { type: projected.type ?? "unknown", truncated: true };
-    } catch { return { type: "unknown", truncated: true }; }
+    try { return Buffer.byteLength(JSON.stringify(projected)) <= 32 * 1024 ? projected : { type: projected.type ?? "unknown", truncated: true }; }
+    catch { return { type: "unknown", truncated: true }; }
   }
-  #projectActorEvent(frame, record) {
+  #projectActorEvent(frame) {
     const type = typeof frame?.type === "string" ? frame.type : "unknown";
-    if (["agent_start", "agent_settled"].includes(type) && record) {
-      record.assistantMessageIdentity = null; record.assistantTextIds.clear();
-    }
-    if (type === "message_update") {
-      const update = frame.assistantMessageEvent;
-      if (!["text_start", "text_delta", "text_end"].includes(update?.type)
-        || update.type === "text_delta" && typeof update.delta !== "string") return null;
-      const contentIndex = Number.isSafeInteger(update.contentIndex) && update.contentIndex >= 0 && update.contentIndex <= 1_000_000_000 ? update.contentIndex : 0;
-      if (update.type === "text_start" && typeof update.id === "string" && update.id.length > 0
-        && update.id.length <= 128 && !/[\u0000-\u001f\u007f]/.test(update.id)) record?.assistantTextIds.set(contentIndex, update.id);
-      const message = frame.message ?? { ...record?.assistantMessageIdentity,
-        content: { [contentIndex]: { type: "text", id: record?.assistantTextIds.get(contentIndex),
-          text: update.content ?? update.text ?? update.delta ?? "", harnessBirth: update.harnessBirth } } };
-      const part = assistantTextPart(message, contentIndex);
-      if (!part) return null;
-      return { type, messageId: part.id, createdAt: part.createdAt, ...(part.timelineSequence ? { timelineSequence: part.timelineSequence } : {}), assistantMessageEvent: { type: update.type, contentIndex,
-        ...(update.type === "text_delta" ? { delta: update.delta } : {}), ...(update.type === "text_end" ? { text: part.text } : {}) } };
-    }
-    if (type === "message_start") {
-      const role = frame.message?.role;
-      if (role !== "assistant") return { type };
-      const timestamp = Number.isSafeInteger(frame.message.timestamp) && frame.message.timestamp >= 0 ? frame.message.timestamp : Date.now();
-      const identity = { role, timestamp, ...(typeof frame.message.id === "string" && frame.message.id ? { id: frame.message.id } : {}) };
-      if (record) {
-        record.assistantMessageIdentity = identity; record.assistantTextIds.clear();
-        for (const [index, part] of (Array.isArray(frame.message.content) ? frame.message.content : []).entries()) {
-          if (part?.type === "text" && typeof part.id === "string" && part.id.length > 0 && part.id.length <= 128
-            && !/[\u0000-\u001f\u007f]/.test(part.id)) record.assistantTextIds.set(index, part.id);
-        }
-      }
-      return { type, message: identity };
-    }
-    if (type === "message_end") {
-      const message = frame.message;
-      // The canonical reader owns image rows and bytes. Only invalidate public
-      // history after a committed root result; never forward raw tool payloads.
-      if (message?.role === "toolResult" && record?.rootOutputSession?.kind === "root"
-        && record.rootOutputSession.depth === 0 && message.content?.some(part => part?.type === "image")) {
-        return { type, message: { role: "toolResult" } };
-      }
-      if (message?.role !== "assistant") return { type };
-      const content = Array.isArray(message.content)
-        ? message.content.map((part, contentIndex) => {
-          if (part?.type !== "text" || typeof part.text !== "string") return null;
-          const projected = assistantTextPart(message, contentIndex, { timestamp: record?.assistantMessageIdentity?.timestamp });
-          return { type: "text", text: part.text, ...(projected ? { id: projected.id, createdAt: projected.createdAt, ...(projected.timelineSequence ? { timelineSequence: projected.timelineSequence } : {}), contentIndex } : {}) };
-        }).filter(Boolean) : [];
-      const stopReason = ["stop", "length", "toolUse", "error", "aborted"].includes(message.stopReason) ? message.stopReason : "unknown";
-      const messageId = typeof message.id === "string" && message.id.length > 0 && message.id.length <= 128
-        && !/[\u0000-\u001f\u007f]/.test(message.id) ? message.id : undefined;
-      let timestamp;
-      if (Number.isSafeInteger(message.timestamp) && message.timestamp >= 0) timestamp = message.timestamp;
-      else if (typeof message.timestamp === "string" && message.timestamp.length <= 64) {
-        const parsed = new Date(message.timestamp); if (!Number.isNaN(parsed.valueOf())) timestamp = parsed.toISOString();
-      }
-      return { type, message: { role: "assistant", content, stopReason,
-        ...(messageId ? { id: messageId } : {}), ...(timestamp !== undefined ? { timestamp } : {}) } };
-    }
-    if (["tool_execution_start", "tool_execution_update", "tool_execution_end"].includes(type)) {
-      return { type,
-        ...(typeof frame.toolCallId === "string" ? { toolCallId: frame.toolCallId } : {}),
-        ...(typeof frame.toolName === "string" ? { toolName: frame.toolName } : {}),
-        ...(typeof frame.isError === "boolean" ? { isError: frame.isError } : {}) };
-    }
     if (type === "progress_entry") {
-      const summary = normalizeProgressHeading(frame.summary);
+      // The heading arrived checked (protocol.mjs).
       const createdAt = new Date(frame.createdAt);
-      if (!summary || summary !== frame.summary || typeof frame.entryId !== "string" || !frame.entryId
+      if (typeof frame.summary !== "string" || !frame.summary || typeof frame.entryId !== "string" || !frame.entryId
         || frame.entryId.length > 128 || Number.isNaN(createdAt.valueOf())) return null;
-      return { type, entryId: frame.entryId, summary, createdAt: createdAt.toISOString(), ...birthOrder(frame.harnessBirth) };
+      return { type, entryId: frame.entryId, summary: frame.summary, createdAt: createdAt.toISOString(), ...birthOrder(frame.harnessBirth) };
     }
     if (type === "agent_message_entry") {
       const createdAt = new Date(frame.createdAt);

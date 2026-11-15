@@ -96,17 +96,6 @@ export function selectIncomingFamilyMessages(items) {
   return items.filter(item => item?.direction !== "from" || !item.familyMessageId || selected.get(item.familyMessageId) === item);
 }
 
-export function pendingFamilyMessage(message, sender) {
-  const item = projectAgentMessageEntry({ type: "custom", customType: AGENT_MESSAGE_ENTRY_TYPE,
-    id: message.messageId, timestamp: message.acceptedAt,
-    data: { messageId: message.messageId, direction: "from", peerId: message.senderId,
-      peerName: sender?.name ?? sender?.shortId ?? message.senderId,
-      relationship: message.relationship === "parent" ? "child" : message.relationship === "child" ? "parent" : message.relationship,
-      body: message.body } });
-  if (!item) return undefined;
-  return projectAgentMessageHistoryMessage({ ...item, deliveryMode: message.deliveryMode, transportState: message.state });
-}
-
 export function projectChildCreationHistoryMessage(item) {
   const id = bounded(item?.id ?? item?.entryId, 128, 512); const createdAt = timestamp(item?.createdAt);
   const taskId = bounded(item?.taskId, 128, 512); const childId = bounded(item?.childId, 128, 512);

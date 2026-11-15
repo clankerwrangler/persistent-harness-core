@@ -8,7 +8,8 @@ import { locationBlock, normalizeInputLocation } from "../src/input-location.mjs
 import { messageTimeBlock } from "../src/message-time.mjs";
 import { actorInputDigest, validateRequest, PROTOCOL_VERSION } from "../src/protocol.mjs";
 import { HarnessStore } from "../src/store.mjs";
-import { pendingInputMessage, projectVisibleMessage } from "../src/conversation-projection.mjs";
+import { projectVisibleMessage } from "../src/conversation-projection.mjs";
+import { pendingInputMessage } from "../src/pending-rows.mjs";
 
 const location = { latitude: 12.345678, longitude: -76.54321, accuracy: 8.5, timestamp: 1700000000123 };
 const request = params => validateRequest({ version: PROTOCOL_VERSION, id: "request", type: "submit_input", params: { sessionId: "root", ...params } }).params;

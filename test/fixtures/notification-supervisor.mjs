@@ -6,6 +6,7 @@ import path from "node:path";
 import { HarnessClient } from "../../src/client.mjs";
 import { HarnessSupervisor, fileSessions } from "./isolated-supervisor.mjs";
 import { createCoreSession } from "../../src/core-session.mjs";
+import { liveFrame } from "./live-session.mjs";
 export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export async function eventually(predicate, timeout = 120_000) {
   const deadline = Date.now() + timeout;
@@ -23,6 +24,7 @@ class Actor extends EventEmitter {
       cwd: this.session.cwd, repositoryRoot: this.session.repositoryRoot, actorToken: this.session.actorToken, actorGeneration: this.session.actorGeneration });
     this.isRunning = true; return this.state();
   }
+  emit(name, value) { if (name === "event") { value = liveFrame(this, value); if (!value) return false; } return super.emit(name, value); }
   busy() { this.streaming = true; this.emit("event", { type: "agent_start" }); }
   idle() { this.streaming = false; this.emit("event", { type: "agent_settled" }); }
   async request(type, params = {}) {

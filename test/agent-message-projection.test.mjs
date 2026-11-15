@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AGENT_MESSAGE_ENTRY_TYPE, CHILD_CREATION_ENTRY_TYPE, INCOMING_AGENT_MESSAGE_TYPE, selectIncomingFamilyMessages, pendingFamilyMessage, projectAgentMessageEntry, projectAgentMessageHistoryMessage, projectChildCreationHistoryMessage } from "../src/agent-message-projection.mjs";
+import { AGENT_MESSAGE_ENTRY_TYPE, CHILD_CREATION_ENTRY_TYPE, INCOMING_AGENT_MESSAGE_TYPE, selectIncomingFamilyMessages, projectAgentMessageEntry, projectAgentMessageHistoryMessage, projectChildCreationHistoryMessage } from "../src/agent-message-projection.mjs";
+import { pendingFamilyMessage } from "../src/pending-rows.mjs";
 
 const timestamp = "2026-01-01T00:00:00Z";
 test("agent message projection allowlists durable incoming and outgoing communication", () => {
@@ -47,6 +48,12 @@ test("family transport states never certify context admission and preserve sende
     assert.equal(row.transportState, state); assert.equal(row.deliveryMode, "follow_up");
     assert.equal(row.relationship, { parent: "child", child: "parent", sibling: "sister" }[relationship]);
   }
+  // Once delivered, the saved row replaces the pending one: same id, same message.
+  const delivered = projectAgentMessageHistoryMessage(projectAgentMessageEntry({ type: "custom_message", customType: INCOMING_AGENT_MESSAGE_TYPE,
+    id: "entry-1", timestamp, content: "Direct agent message from Peer:\nSame body",
+    details: { messageId: "m", senderId: "peer", senderName: "Peer", relationship: "sibling", body: "Same body" } }));
+  const pending = pendingFamilyMessage({ messageId: "m", senderId: "peer", targetId: "target", acceptedAt: 10, body: "Same body", relationship: "sibling", state: "queued" }, { name: "Peer" });
+  for (const key of ["id", "role", "text", "direction", "relationship", "peerName", "peerId", "familyMessageId"]) assert.equal(pending[key], delivered[key], key);
 });
 
 test("agent message projection fails closed for malformed or private custom entries", () => {

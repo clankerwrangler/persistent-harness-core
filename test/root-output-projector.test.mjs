@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RootOutputProjector, parseRootOutputCursor } from "../src/root-output-projector.mjs";
+import { RootFeed } from "../src/live-view.mjs";
 
 const root = (id) => ({ sessionId: id, kind: "root", depth: 0 });
 const child = { sessionId: "child", kind: "child", depth: 1 };
+// Each session process (one generation of a session) has its own feed; the projector numbers it.
+const feeds = new Map();
 function accept(projector, session, actorGeneration, actorEventSeq, event) {
-  return projector.accept({ session, actorGeneration, actorEventSeq, event });
+  const key = `${session.sessionId}:${actorGeneration}`;
+  if (!feeds.has(key)) feeds.set(key, new RootFeed());
+  const feed = feeds.get(key).accept(event);
+  return feed ? projector.accept({ session, actorGeneration, actorEventSeq, event: feed }) : [];
 }
 
 test("authoritative registry filter includes concurrent roots and excludes children and private events", () => {
