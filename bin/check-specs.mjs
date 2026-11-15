@@ -12,7 +12,13 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { outcomeOf } from "./model-sources.mjs";
+
+function outcomeOf(output, code, timedOut) {
+  if (timedOut) return "timeout";
+  if (/Model checking completed\. No error has been found\./.test(output)) return "pass";
+  if (/is violated|Deadlock reached|Temporal properties were violated|Assumption .* is false/.test(output)) return "violation";
+  return code === 0 ? "pass" : "error";
+}
 
 const root = path.resolve(import.meta.dirname, "..", "specification");
 const expectedPath = path.join(root, "expected-results.json");

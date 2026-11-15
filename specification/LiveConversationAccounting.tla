@@ -1,6 +1,6 @@
 ---------------------- MODULE LiveConversationAccounting ----------------------
 \* Sources:
-\*   src/live-conversation.mjs sha256:3b0408222dbb11dbb1038d129a1a6650ce279ef4652b1b14d6f606ecb910ff6c
+\*   src/live-conversation.mjs
 
 EXTENDS Integers, Sequences, FiniteSets, TLC
 CONSTANTS IDs, ByteLimit, RowLimit, Fault

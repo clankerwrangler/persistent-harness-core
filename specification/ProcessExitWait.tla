@@ -1,6 +1,6 @@
 ------------------------- MODULE ProcessExitWait -------------------------
 \* Sources:
-\*   test/process-ownership.test.mjs sha256:cc7d6703b6a9095c040754cd4e6cc2cde1e8acadcd4c77810c2989cc255c1008
+\*   test/process-ownership.test.mjs
 EXTENDS Naturals
 CONSTANT UnsafeLateListener
 VARIABLES phase, alive, listener, received

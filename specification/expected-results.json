@@ -1,5 +1,8 @@
 {
   "ActorCompileCache.cfg": "pass",
+  "ActorCompileCacheExitOnly.cfg": "violation",
+  "ActorCompileCacheNoWait.cfg": "violation",
+  "ActorCompileCacheUncheckedSource.cfg": "violation",
   "ActorInputReconciliation.OverlappingReports.cfg": "violation",
   "ActorInputReconciliation.cfg": "pass",
   "BackgroundCommandObservation.Reread.cfg": "violation",

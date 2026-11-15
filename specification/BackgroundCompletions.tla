@@ -1,8 +1,8 @@
 ---------------------- MODULE BackgroundCompletions ----------------------
 \* Sources:
-\*   src/background-notifier.mjs sha256:5a196d023ebf583d7ff892c3d2ea6e648cacb21f61dff1fb5a9e103c216cc4d7
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
+\*   src/background-notifier.mjs
+\*   src/supervisor.mjs
+\*   src/core-worker.mjs
 
 EXTENDS Naturals, FiniteSets, Sequences
 CONSTANT Capacity, IgnoreScanOwners

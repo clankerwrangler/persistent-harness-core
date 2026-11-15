@@ -1,6 +1,6 @@
 ------------------------- MODULE CliFixtureLifetime -------------------------
 \* Sources:
-\*   test/supervisor-cli-loading.test.mjs sha256:1fef96f4e9a02b609e0764f487f01eb80d7dd618f6d516b38651c94493782e49
+\*   test/supervisor-cli-loading.test.mjs
 
 EXTENDS Naturals
 CONSTANT JoinExit

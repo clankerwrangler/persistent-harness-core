@@ -1,9 +1,9 @@
 --------------------- MODULE SessionHistorySnapshot ---------------------
 \* Sources:
-\*   src/session-history-index.mjs sha256:3500580c51ec174b689e99fa4c0b8665b6132e9a3abe030fe13c6079ce521f76
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   src/session-records.mjs sha256:8a3cc7904feac37c8fc8f5bf22f5545dba5b0bbe2851964ab0cc19435264a126
-\*   src/core-transcript-reader.mjs sha256:e0f42d64c659fc0ccb74e68c8d6534a938bc4d7c9c16080feecd4014315a3b66
+\*   src/session-history-index.mjs
+\*   src/supervisor.mjs
+\*   src/session-records.mjs
+\*   src/core-transcript-reader.mjs
 EXTENDS Naturals
 CONSTANTS Isolate, ValidateSpans, LabelSnapshot, MaxVersion, HasIndex
 VARIABLES source, committed, staged, writing, query, pinned, captured, strict,

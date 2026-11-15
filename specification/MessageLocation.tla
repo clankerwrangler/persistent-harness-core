@@ -1,13 +1,13 @@
 ------------------------ MODULE MessageLocation ------------------------
 \* Sources:
-\*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
-\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   src/core-transcript-reader.mjs sha256:e0f42d64c659fc0ccb74e68c8d6534a938bc4d7c9c16080feecd4014315a3b66
-\*   src/input-location.mjs sha256:31cfde8719cf706fbd6266f1002783eaf127a9ee35e6cf57a2062db91a140a04
-\*   src/conversation-projection.mjs sha256:76d0753210a8c364e3c6b0a22592f9b74cdd18a05f58ebb9f21ba32b6e8d167e
-\*   src/session-records.mjs sha256:8a3cc7904feac37c8fc8f5bf22f5545dba5b0bbe2851964ab0cc19435264a126
-\*   bin/session-records.mjs sha256:66a7df9c543922de6bf06bc275fc77265542ccea4bac696cd98294effdeb12f5
+\*   src/store.mjs
+\*   src/core-worker.mjs
+\*   src/supervisor.mjs
+\*   src/core-transcript-reader.mjs
+\*   src/input-location.mjs
+\*   src/conversation-projection.mjs
+\*   src/session-records.mjs
+\*   bin/session-records.mjs
 EXTENDS Naturals, Sequences, FiniteSets
 \* The caller supplies an already-frozen optional attachment. Browser consent,
 \* acquisition deadlines, and cancellation are not harness guarantees. The worker sends

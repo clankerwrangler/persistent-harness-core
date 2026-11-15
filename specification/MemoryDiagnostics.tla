@@ -1,9 +1,9 @@
 -------------------- MODULE MemoryDiagnostics --------------------
 \* Sources:
-\*   src/kernel.mjs sha256:b3a52680c0e061db087bd674a0874fcb87e1793b532cd494b58d9631c88c2063
-\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   src/protocol.mjs sha256:48b40e0384b3a637d65b909782657e23c29d57f069e09d083fb6d666306128d6
+\*   src/kernel.mjs
+\*   src/core-worker.mjs
+\*   src/supervisor.mjs
+\*   src/protocol.mjs
 EXTENDS Naturals, TLC
 CONSTANT IgnoreBusy, StartMissing, SkipReserve, MutateRead, BypassAuth
 VARIABLES worker, kernel, queued, draining, phase, allowed, sends, unsafe,

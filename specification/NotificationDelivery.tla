@@ -1,8 +1,8 @@
 -------------------- MODULE NotificationDelivery --------------------
 \* Sources:
-\*   src/notification-store.mjs sha256:b5275d9d48dd65815c88eac20fa8c73b1e1a693c0d1f16b1ad6aa28b1e210426
-\*   src/cron-store.mjs sha256:de72bdeeb19b601bb37f36c097e89c90c74594a3c099555a97b0545354c00dde
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
+\*   src/notification-store.mjs
+\*   src/cron-store.mjs
+\*   src/supervisor.mjs
 EXTENDS Naturals
 CONSTANT Intent
 VARIABLES run, outcome, record, valid, read, resolved, attempt, delivery, shown, deviceRead, deviceOnline, rootBusy, childBusy, declared, input

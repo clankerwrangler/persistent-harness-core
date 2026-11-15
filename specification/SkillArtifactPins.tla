@@ -1,11 +1,11 @@
 ----------------------- MODULE SkillArtifactPins -----------------------
 \* Sources:
-\*   src/skill-artifacts.mjs sha256:70a007f561469ebc23c95e78f63d383a480c24fe0b980aae25c67c63f3cfcbd6
-\*   src/skills.mjs sha256:ea48cd05dd3796e1bec709aa1dbba8b3da4daac2936827f0dbf954ed0ff2c36e
-\*   src/session-paths.mjs sha256:29876ed5876a46138ee6874209b723665611a4e4bad6474f9a6cbef49e7e1040
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
-\*   src/skill-grant.mjs sha256:b11b2c16a45d8edfbef6354b042e9ec54d4964181c41a996fb21b974e2c2a903
+\*   src/skill-artifacts.mjs
+\*   src/skills.mjs
+\*   src/session-paths.mjs
+\*   src/supervisor.mjs
+\*   src/core-worker.mjs
+\*   src/skill-grant.mjs
 EXTENDS Naturals, FiniteSets
 CONSTANTS Actors, ReadyUsesDesired, SnapshotUsesDesired
 Versions == {1, 2}

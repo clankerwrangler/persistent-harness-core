@@ -1,6 +1,6 @@
 ---------------------- MODULE ScratchJobIdentity ----------------------
 \* Sources:
-\*   src/background-notifier.mjs sha256:5a196d023ebf583d7ff892c3d2ea6e648cacb21f61dff1fb5a9e103c216cc4d7
+\*   src/background-notifier.mjs
 EXTENDS TLC
 CONSTANT FreezeIncomplete
 RootIdentity == [owner |-> "root", kind |-> "valid", pid |-> "new", birth |-> "new"]

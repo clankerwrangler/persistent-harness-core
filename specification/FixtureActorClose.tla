@@ -1,7 +1,7 @@
 ------------------------- MODULE FixtureActorClose -------------------------
 \* Sources:
-\*   test/fixtures/notification-supervisor.mjs sha256:b5eddf898a2c58753714b1584665bd8f0f6a76207aa931380ddc353a9bee1720
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
+\*   test/fixtures/notification-supervisor.mjs
+\*   src/supervisor.mjs
 
 EXTENDS Naturals, TLC
 CONSTANT JoinClose

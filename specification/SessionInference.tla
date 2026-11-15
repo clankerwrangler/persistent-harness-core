@@ -1,8 +1,8 @@
 ----------------------- MODULE SessionInference -----------------------
 \* Sources:
-\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
-\*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
+\*   src/core-worker.mjs
+\*   src/store.mjs
+\*   src/supervisor.mjs
 EXTENDS Integers, TLC
 CONSTANTS Models, GuardAbort, GuardRevision
 VARIABLES serial, desired, active, durableActive, pending, received, applying,

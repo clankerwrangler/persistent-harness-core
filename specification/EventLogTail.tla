@@ -1,6 +1,6 @@
 ----------------------------- MODULE EventLogTail -----------------------------
 \* Sources:
-\*   src/event-log-reader.mjs sha256:b9f1f3008da6279fd4c8d6ef83e0d08e7dcb5ddb2c239361da74bef7aad048a0
+\*   src/event-log-reader.mjs
 
 EXTENDS Naturals, Sequences, FiniteSets
 CONSTANTS Limit, MaxLines, Values, Blank, Malformed

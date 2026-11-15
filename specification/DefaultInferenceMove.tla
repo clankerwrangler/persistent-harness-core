@@ -1,8 +1,8 @@
 ---------------------- MODULE DefaultInferenceMove ----------------------
 \* Sources:
-\*   src/default-inference.mjs sha256:de8c3c48ca29dffcd99a2a8c72bc9eb6582a1d4cde55e3551f7ac74978f4cc47
-\*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
+\*   src/default-inference.mjs
+\*   src/store.mjs
+\*   src/supervisor.mjs
 EXTENDS Naturals
 CONSTANTS Sessions, Pinned, Old, New, SettingsFirst
 

@@ -1,7 +1,7 @@
 -------------------- MODULE NotificationLifecycle --------------------
 \* Sources:
-\*   src/notification-store.mjs sha256:b5275d9d48dd65815c88eac20fa8c73b1e1a693c0d1f16b1ad6aa28b1e210426
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
+\*   src/notification-store.mjs
+\*   src/supervisor.mjs
 EXTENDS Naturals, FiniteSets, Sequences
 CONSTANTS Actors, Root, MaxEpisodes
 VARIABLES episode, busy, pending, quiet, closed, needs, idleNotices, needNotices, background, owner, pendingUser, jobOwner, pendingOwner, idleDuringBackground

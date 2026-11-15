@@ -1,6 +1,6 @@
 ------------------------ MODULE KernelStreamAccounting ------------------------
 \* Sources:
-\*   src/kernel.mjs sha256:b3a52680c0e061db087bd674a0874fcb87e1793b532cd494b58d9631c88c2063
+\*   src/kernel.mjs
 
 EXTENDS Integers, Sequences, TLC
 CONSTANT Fault

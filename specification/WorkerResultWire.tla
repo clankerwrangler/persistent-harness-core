@@ -1,8 +1,8 @@
 ------------------------- MODULE WorkerResultWire -------------------------
 \* Sources:
-\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   src/live-view.mjs sha256:fa7a8846c1a485bd3f38084cd8ffe77f2c24b5066738f9ae21925d7cedd7dbf8
+\*   src/core-worker.mjs
+\*   src/supervisor.mjs
+\*   src/live-view.mjs
 
 \* The session's live view (live-view.mjs) passes the core's events on to the supervisor. Tool calls and results
 \* lose their bodies on the way: the supervisor needs only which call started or ended.

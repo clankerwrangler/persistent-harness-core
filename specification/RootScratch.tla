@@ -1,10 +1,10 @@
 -------------------------- MODULE RootScratch --------------------------
 \* Sources:
-\*   src/session-scratch.mjs sha256:a2a94a3dfd9c3e476cd845ac9cab3b3026a8d5c6e42ebe935a0f28218495cfe9
-\*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   src/process-ownership.mjs sha256:efa41d00c5b4c1bf61ca2eeff513d9c97b2ca9b794a376a32ed12a41f6d4b9d8
-\*   src/background-notifier.mjs sha256:5a196d023ebf583d7ff892c3d2ea6e648cacb21f61dff1fb5a9e103c216cc4d7
+\*   src/session-scratch.mjs
+\*   src/store.mjs
+\*   src/supervisor.mjs
+\*   src/process-ownership.mjs
+\*   src/background-notifier.mjs
 EXTENDS FiniteSets, TLC
 CONSTANT Fault, ServiceMarked
 Nodes == {"root", "child", "grandchild", "other"}

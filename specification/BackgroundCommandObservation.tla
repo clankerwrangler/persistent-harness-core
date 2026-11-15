@@ -1,6 +1,6 @@
 ---------------- MODULE BackgroundCommandObservation ----------------
 \* Sources:
-\*   skills/background/src/harness_background/__init__.py sha256:3e15012c7139fed02e0cd3c81154408d4c5a2d82a777bd8b995df2fae67e622f
+\*   skills/background/src/harness_background/__init__.py
 
 EXTENDS Naturals, Sequences, TLC
 CONSTANT Fault

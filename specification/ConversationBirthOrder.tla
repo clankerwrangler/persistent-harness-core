@@ -1,11 +1,11 @@
 ----------------------- MODULE ConversationBirthOrder -----------------------
 \* Sources:
-\*   src/conversation-projection.mjs sha256:76d0753210a8c364e3c6b0a22592f9b74cdd18a05f58ebb9f21ba32b6e8d167e
-\*   src/progress-projection.mjs sha256:7c1977d1717c97c90fb90bd6c6958516367957048c35862d85c591ac82702519
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   src/live-view.mjs sha256:fa7a8846c1a485bd3f38084cd8ffe77f2c24b5066738f9ae21925d7cedd7dbf8
-\*   src/conversation-birth.mjs sha256:a2634f6138784dea843f9f0269f5e25b9db862c5c944fd443612aebedcfec402
-\*   src/pending-rows.mjs sha256:be5226e13a48758ceba2f106a7691ce14a3d1da99e0f734501f7814c0f27b8f9
+\*   src/conversation-projection.mjs
+\*   src/progress-projection.mjs
+\*   src/supervisor.mjs
+\*   src/live-view.mjs
+\*   src/conversation-birth.mjs
+\*   src/pending-rows.mjs
 
 \* Reply text and progress headings are shown in the order they began, live and after a
 \* reload. A reply's request starts first; reasoning shown meanwhile is recorded as

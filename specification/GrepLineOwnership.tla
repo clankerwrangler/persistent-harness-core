@@ -1,6 +1,6 @@
 --------------------------- MODULE GrepLineOwnership ---------------------------
 \* Sources:
-\*   src/grep-worker.mjs sha256:1057c5db98f556974370579578d05ffff649b02d5ed6e7a826ca4283ec89d525
+\*   src/grep-worker.mjs
 
 EXTENDS Integers, Sequences, TLC
 CONSTANT Fault

@@ -1,8 +1,8 @@
 ------------------- MODULE RecursiveSessionDeletion -------------------
 \* Sources:
-\*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   test/recursive-session-delete.test.mjs sha256:6a0376c0f39d198e88e0557b0750ed95139f86595d77c1fa3f884a1a8d6b953d
+\*   src/store.mjs
+\*   src/supervisor.mjs
+\*   test/recursive-session-delete.test.mjs
 EXTENDS FiniteSets, TLC
 CONSTANT Legacy, Selected
 Nodes == {"root", "child", "grandchild", "new", "sibling", "other"}

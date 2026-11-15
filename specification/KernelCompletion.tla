@@ -1,7 +1,7 @@
 -------------------------- MODULE KernelCompletion ---------------------------
 \* Sources:
-\*   src/kernel.mjs sha256:b3a52680c0e061db087bd674a0874fcb87e1793b532cd494b58d9631c88c2063
-\*   python-runtime/kernel.py sha256:d4aa99006f90d531b546686f6208dc48f77609f4faa00dabb91e7a81f80bc361
+\*   src/kernel.mjs
+\*   python-runtime/kernel.py
 
 \* Done retires execution interruption before output drain. A synchronous
 \* snapshot has a fresh caller-owned token; a deferred snapshot has none.

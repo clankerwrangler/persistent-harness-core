@@ -1,6 +1,6 @@
 ---------------------- MODULE SettledWakeOrdering ----------------------
 \* Sources:
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
+\*   src/supervisor.mjs
 EXTENDS Naturals, Sequences, TLC
 CONSTANTS FenceExitedWake, PreserveFreshInput, BadStopSkipsOwner
 VARIABLES queue, mutationHeld, stopAdmitted, settledAdmitted, stopFirst,

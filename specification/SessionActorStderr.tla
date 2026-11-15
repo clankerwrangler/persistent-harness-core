@@ -1,6 +1,6 @@
 ------------------------- MODULE SessionActorStderr -------------------------
 \* Sources:
-\*   src/session-process.mjs sha256:fc18d784685a5f20f85819c29a192e3931a161870b0044df60e68a757dde7bfe
+\*   src/session-process.mjs
 EXTENDS Naturals, Integers, Sequences, TLC
 CONSTANT Fault
 Cap == 4

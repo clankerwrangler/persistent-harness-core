@@ -1,11 +1,11 @@
 --------------------------- MODULE VisibleOutputImages ---------------------------
 \* Sources:
-\*   src/core-transcript-reader.mjs sha256:e0f42d64c659fc0ccb74e68c8d6534a938bc4d7c9c16080feecd4014315a3b66
-\*   src/conversation-projection.mjs sha256:76d0753210a8c364e3c6b0a22592f9b74cdd18a05f58ebb9f21ba32b6e8d167e
-\*   src/input-images.mjs sha256:6325106ac1c28778a2f1ec2db7efbd13b72718990634894eb8e03ea2ba429076
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   src/session-records.mjs sha256:8a3cc7904feac37c8fc8f5bf22f5545dba5b0bbe2851964ab0cc19435264a126
-\*   bin/session-records.mjs sha256:66a7df9c543922de6bf06bc275fc77265542ccea4bac696cd98294effdeb12f5
+\*   src/core-transcript-reader.mjs
+\*   src/conversation-projection.mjs
+\*   src/input-images.mjs
+\*   src/supervisor.mjs
+\*   src/session-records.mjs
+\*   bin/session-records.mjs
 EXTENDS Naturals, Sequences
 CONSTANT Bug
 \* Request-time image authorization. Each request rereads the entry from the core's

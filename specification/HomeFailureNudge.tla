@@ -1,9 +1,9 @@
 ---- MODULE HomeFailureNudge ----
 \* Sources:
-\*   src/home-failure-nudge.mjs sha256:d733501fa1eb47724afcce40fd5d09a9011f3b448f35d95efbfed7be25ac62b0
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
-\*   src/live-view.mjs sha256:fa7a8846c1a485bd3f38084cd8ffe77f2c24b5066738f9ae21925d7cedd7dbf8
+\*   src/home-failure-nudge.mjs
+\*   src/supervisor.mjs
+\*   src/core-worker.mjs
+\*   src/live-view.mjs
 
 \* Nobody observes Home's own failed run, so the supervisor nudges it later.
 \* Its failure report travels on the control socket, its settle on the event

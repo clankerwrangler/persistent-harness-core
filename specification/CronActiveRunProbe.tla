@@ -1,7 +1,7 @@
 -------------------- MODULE CronActiveRunProbe --------------------
 \* Sources:
-\*   src/cron-store.mjs sha256:de72bdeeb19b601bb37f36c097e89c90c74594a3c099555a97b0545354c00dde
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
+\*   src/cron-store.mjs
+\*   src/supervisor.mjs
 
 EXTENDS Naturals, FiniteSets, TLC
 CONSTANT Fault

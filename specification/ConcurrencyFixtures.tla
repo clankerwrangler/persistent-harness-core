@@ -1,9 +1,9 @@
 ------------------------- MODULE ConcurrencyFixtures -------------------------
 \* Sources:
-\*   test/files-atomic-cas.test.mjs sha256:14cd107f9dad82a42cb7b655d74843a57dae98624a15074b82bbd36048b32f0e
-\*   test/host-handlers-hardening.test.mjs sha256:813374dcd42b8252b4f6da7dbe36091c4cc58aca5ef36a1b7f527f95a41b11f2
-\*   test/supervisor-transport.test.mjs sha256:4339337ba0d548dca74624139bc8ece226bc5d77cb83ab87feb520a3c1be0e84
-\*   src/grep-worker.mjs sha256:1057c5db98f556974370579578d05ffff649b02d5ed6e7a826ca4283ec89d525
+\*   test/files-atomic-cas.test.mjs
+\*   test/host-handlers-hardening.test.mjs
+\*   test/supervisor-transport.test.mjs
+\*   src/grep-worker.mjs
 
 EXTENDS Naturals
 CONSTANTS Rendezvous, NoFollow, CallbackIndependent, Backlog

@@ -1,10 +1,10 @@
 --------------------- MODULE ActorInputReconciliation ---------------------
 \* Sources:
-\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
-\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
-\*   src/core-transcript-reader.mjs sha256:e0f42d64c659fc0ccb74e68c8d6534a938bc4d7c9c16080feecd4014315a3b66
-\*   src/session-records.mjs sha256:8a3cc7904feac37c8fc8f5bf22f5545dba5b0bbe2851964ab0cc19435264a126
-\*   bin/session-records.mjs sha256:66a7df9c543922de6bf06bc275fc77265542ccea4bac696cd98294effdeb12f5
+\*   src/core-worker.mjs
+\*   src/supervisor.mjs
+\*   src/core-transcript-reader.mjs
+\*   src/session-records.mjs
+\*   bin/session-records.mjs
 
 EXTENDS Naturals, FiniteSets
 CONSTANTS ReconcileHistory, SingleFlightReports
