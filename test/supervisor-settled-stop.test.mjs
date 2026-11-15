@@ -10,7 +10,7 @@ import { SessionProcess } from "../src/session-process.mjs";
 import { HarnessSupervisor } from "./fixtures/isolated-supervisor.mjs";
 import { PythonRuntimeManager } from "../src/python-runtime.mjs";
 import { CoreTranscriptReader } from "../src/core-transcript-reader.mjs";
-import { coreSessionHistory } from "../src/core-session.mjs";
+import { coreSessionHistory } from "../src/core-transcript-reader.mjs";
 
 async function until(probe, description, timeout = 120_000) {
   const deadline = Date.now() + timeout;

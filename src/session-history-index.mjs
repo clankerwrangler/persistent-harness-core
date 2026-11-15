@@ -2,15 +2,12 @@
 // has a fixed number, so the index remembers, per session, the last entry it indexed and
 // asks the core only for the entries after it. The index holds no conversation text (its
 // full-text table is contentless): a result's text, and an opened entry's neighbours, are
-// asked of the core by entry number. Everything is read through the core.
+// asked of the session half by entry number (`searchable`), which reads them through the core.
 import { chmodSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { setImmediate as yieldToIO } from "node:timers/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { coreSessionHistory } from "./core-session.mjs";
-import { projectVisibleMessage } from "./conversation-projection.mjs";
-import { PRESENTATION_HISTORY_PREFIX } from "./presentation-directive.mjs";
 
 // Version 5: core sessions, indexed by entry number (older versions are rebuilt).
 export const SESSION_HISTORY_SCHEMA_VERSION = 5;
@@ -46,22 +43,6 @@ function truncatePrefix(value, maximum) {
   if (maximum <= 0) return { text: "", truncated: true };
   if (maximum === 1) return { text: "…", truncated: true };
   return { text: `${chars.slice(0, maximum - 1).join("")}…`, truncated: true };
-}
-
-/** Remove terminal escape sequences and non-printing controls while preserving plain layout. */
-export function sanitizeSessionHistoryText(value) {
-  return String(value ?? "")
-    .replace(/\r\n?/gu, "\n")
-    // Operating-system command strings, terminated by BEL or string terminator.
-    .replace(/\u001B\][\s\S]*?(?:\u0007|\u001B\\)/gu, "")
-    // Control Sequence Introducer (7-bit ESC [ and 8-bit C1 forms).
-    .replace(/(?:\u001B\[|\u009B)[0-?]*[ -/]*[@-~]/gu, "")
-    // Remaining two-byte ANSI escape functions.
-    .replace(/\u001B[@-_]/gu, "")
-    // C0/C1 controls other than tab, LF, and CR.
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu, "")
-    // Bidirectional layout controls can visually reorder otherwise plain text.
-    .replace(/[؜‎‏‪-‮⁦-⁩]/gu, "");
 }
 
 function normalizedSession(value, context = "session") {
@@ -182,34 +163,20 @@ function publicMessage(message, text = message.text) {
     citation: { sessionId: null, entryId: message.id } };
 }
 
-/** An entry's number in its session's history, or undefined for anything else. */
-function entryNumber(entry) {
-  const n = Number(entry?.id);
-  return typeof entry?.id === "string" && Number.isSafeInteger(n) && n >= 0 && String(n) === entry.id ? n : undefined;
-}
-
-/** What search sees of an entry: a user or assistant message's visible text, as shown. */
-function searchableMessage(entry, sanitizePresentation) {
-  const message = projectVisibleMessage(entry, { sanitizePresentation });
-  if (!message || !ROLES.has(message.role) || entryNumber(entry) === undefined) return undefined;
-  let text = sanitizeSessionHistoryText(message.text);
-  if (sanitizePresentation && message.role === "assistant") text = text.replace(PRESENTATION_HISTORY_PREFIX, "");
-  if (!text.trim()) return undefined;
-  return { id: entry.id, n: entryNumber(entry), role: message.role, text, createdAt: message.createdAt };
-}
-
 export class SessionHistoryIndex {
   #db;
   #closed = false;
   // Sessions whose history disagreed with the index: the next refresh indexes them again.
   #stale = new Set();
 
-  /** `history(sessionFile, { from, to })`: the session's entries from `from` through `to`, through the core. */
-  constructor({ databasePath, history = coreSessionHistory }) {
+  /** `searchable(sessionFile, { from, to }, sanitizePresentation)`: what search sees of the
+   * session's entries `from` through `to`, `{ last, messages }` (`last`: the newest entry
+   * number read, or null when there were none). */
+  constructor({ databasePath, searchable }) {
     if (typeof databasePath !== "string" || !databasePath) throw new TypeError("databasePath is required");
-    if (typeof history !== "function") throw new TypeError("history is required");
+    if (typeof searchable !== "function") throw new TypeError("searchable is required");
     this.databasePath = databasePath === ":memory:" ? databasePath : path.resolve(databasePath);
-    this.history = history;
+    this.searchable = searchable;
     if (this.databasePath !== ":memory:") {
       const parent = path.dirname(this.databasePath);
       mkdirSync(parent, { recursive: true, mode: 0o700 });
@@ -308,11 +275,13 @@ export class SessionHistoryIndex {
     this.#db.prepare("DELETE FROM sources WHERE session_id = ?").run(sessionId);
   }
 
-  /** The session's entries numbered from `from` through `to`, through the core. */
+  /** What search sees of the session's entries numbered from `from` through `to`. */
   async #entries(session, from, to = Number.MAX_SAFE_INTEGER) {
-    const entries = await this.history(session.sessionFile, { from, to });
-    if (!Array.isArray(entries)) throw new Error("the core did not return history");
-    return entries.filter((entry) => { const n = entryNumber(entry); return n !== undefined && n >= from && n <= to; });
+    const read = await this.searchable(session.sessionFile, { from, to }, session.sanitizePresentation);
+    if (!Array.isArray(read?.messages) || !(read.last === null || Number.isSafeInteger(read.last))) {
+      throw new Error("the session did not return searchable history");
+    }
+    return { last: read.last, messages: read.messages.filter((message) => message.n >= from && message.n <= to) };
   }
 
   /** Index what is new in each session. `automatic` (maintenance) and strict (a caller) refresh alike. */
@@ -353,7 +322,7 @@ export class SessionHistoryIndex {
         continue;
       }
       signal?.throwIfAborted();
-      if (source && !restart && !added.length) {
+      if (source && !restart && added.last === null) {
         this.#db.prepare("UPDATE sources SET indexed_at = ? WHERE session_id = ?").run(Date.now(), session.sessionId);
         unchanged.push(session.sessionId);
         continue;
@@ -361,7 +330,7 @@ export class SessionHistoryIndex {
       this.#db.exec("BEGIN IMMEDIATE");
       try {
         if (restart) { this.#deleteSession(session.sessionId); source = undefined; }
-        const through = added.reduce((max, entry) => Math.max(max, entryNumber(entry)), source ? Number(source.indexed_through) : -1);
+        const through = Math.max(added.last ?? -1, source ? Number(source.indexed_through) : -1);
         this.#db.prepare(`INSERT INTO sources(session_id, session_file, sanitize_presentation, indexed_through, indexed_at)
           VALUES (?, ?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET indexed_through = excluded.indexed_through, indexed_at = excluded.indexed_at`)
           .run(session.sessionId, session.sessionFile, session.sanitizePresentation ? 1 : 0, through, Date.now());
@@ -369,10 +338,8 @@ export class SessionHistoryIndex {
           VALUES (?, ?, ?, ?, ?, ?)`);
         const insertFts = this.#db.prepare("INSERT INTO message_fts(rowid, text) VALUES (?, ?)");
         let count = 0;
-        for (const entry of added) {
+        for (const message of added.messages) {
           if (count++ % 128 === 0) { await yieldToIO(); signal?.throwIfAborted(); }
-          const message = searchableMessage(entry, session.sanitizePresentation);
-          if (!message) continue;
           const row = insertDocument.run(session.sessionId, message.id, message.n, message.role, message.createdAt, textHash(message.text));
           if (row.changes) insertFts.run(Number(row.lastInsertRowid), message.text);
         }
@@ -391,13 +358,9 @@ export class SessionHistoryIndex {
     signal?.throwIfAborted();
     if (!rows.length) return [];
     const numbers = rows.map((row) => Number(row.entry_n));
-    const entries = await this.#entries(session, Math.min(...numbers), Math.max(...numbers));
+    const { messages } = await this.#entries(session, Math.min(...numbers), Math.max(...numbers));
     signal?.throwIfAborted();
-    const byId = new Map();
-    for (const entry of entries) {
-      const message = searchableMessage(entry, session.sanitizePresentation);
-      if (message) byId.set(message.id, message);
-    }
+    const byId = new Map(messages.map((message) => [message.id, message]));
     return rows.map((row) => {
       const message = byId.get(row.entry_id);
       if (!message || message.role !== row.role || textHash(message.text) !== row.text_hash) {

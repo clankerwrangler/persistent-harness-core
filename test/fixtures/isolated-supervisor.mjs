@@ -3,7 +3,7 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { HarnessSupervisor as Supervisor } from "../../src/supervisor.mjs";
 import { CoreTranscriptReader } from "../../src/core-transcript-reader.mjs";
-import { coreSessionHistory } from "../../src/core-session.mjs";
+import { coreSessionHistory } from "../../src/core-transcript-reader.mjs";
 export * from "../../src/supervisor.mjs";
 
 /**

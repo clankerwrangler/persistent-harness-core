@@ -19,7 +19,7 @@ test("each session folder is cleaned once per pass, sidecars and failures do not
   for (const name of ["a", "b", "c", "a.kernel-state", ".scratch"]) await mkdir(path.join(dir, name));
   await writeFile(path.join(dir, "a.skill-grant.json"), "{}");
   const asked = [], runs = [];
-  const reaper = new CoreReaper({ sessionsDirectory: dir, onRun: (s) => runs.push(s), logger: { error() {} },
+  const reaper = new CoreReaper({ recoveryFields: async () => [...RECOVERY_DETAIL_FIELDS], sessionsDirectory: dir, onRun: (s) => runs.push(s), logger: { error() {} },
     reap: async (session, age) => {
       asked.push([path.basename(session), age]);
       if (path.basename(session) === "b") throw new Error("broken");
@@ -35,7 +35,7 @@ test("each session folder is cleaned once per pass, sidecars and failures do not
 
 test("a missing sessions folder is an empty pass", async (t) => {
   const dir = await folder(t);
-  const reaper = new CoreReaper({ sessionsDirectory: path.join(dir, "none"), reap: async () => assert.fail("nothing to clean") });
+  const reaper = new CoreReaper({ recoveryFields: async () => [...RECOVERY_DETAIL_FIELDS], sessionsDirectory: path.join(dir, "none"), reap: async () => assert.fail("nothing to clean") });
   assert.deepEqual(await reaper.runOnce(), { sessions: 0, files: 0, bytes: 0, failed: 0 });
 });
 
@@ -43,7 +43,7 @@ test("passes repeat at the interval after the first delay and stop waits for a r
   const dir = await folder(t);
   await mkdir(path.join(dir, "s"));
   let passes = 0, release;
-  const reaper = new CoreReaper({ sessionsDirectory: dir, firstDelayMs: 5, intervalMs: 5, logger: { error() {} },
+  const reaper = new CoreReaper({ recoveryFields: async () => [...RECOVERY_DETAIL_FIELDS], sessionsDirectory: dir, firstDelayMs: 5, intervalMs: 5, logger: { error() {} },
     reap: async () => { passes += 1; if (passes === 3) await new Promise((resolve) => { release = resolve; }); return { deleted: [], bytes: 0 }; } });
   reaper.start();
   while (passes < 3) await new Promise((resolve) => setTimeout(resolve, 5));
@@ -65,9 +65,9 @@ test("an older core that does not know the cleanup protocol is never asked to de
   const old = path.join(dir, "old-core"), recording = path.join(dir, "new-core"), seen = path.join(dir, "seen");
   await writeFile(old, `#!/bin/sh\nfor a in "$@"; do [ "$a" = --protocol ] && { echo "usage" >&2; exit 2; }; done\nrm -f "$2"/log/*.payload.jsonl; echo '{"deleted":[],"bytes":0}'\n`, { mode: 0o755 });
   await writeFile(recording, `#!/bin/sh\necho "$@" > "${seen}"\necho '{"deleted":[],"bytes":0}'\n`, { mode: 0o755 });
-  await assert.rejects(coreReap(session, REAP_AGE_SECONDS, { env: { ...process.env, PI_HARNESS_CORE_BIN: old } }));
+  await assert.rejects(coreReap(session, REAP_AGE_SECONDS, { keepDetails: RECOVERY_DETAIL_FIELDS, env: { ...process.env, PI_HARNESS_CORE_BIN: old } }));
   assert.ok(existsSync(path.join(session, "log/000001.payload.jsonl")), "nothing deleted");
-  await coreReap(session, REAP_AGE_SECONDS, { env: { ...process.env, PI_HARNESS_CORE_BIN: recording } });
+  await coreReap(session, REAP_AGE_SECONDS, { keepDetails: RECOVERY_DETAIL_FIELDS, env: { ...process.env, PI_HARNESS_CORE_BIN: recording } });
   const args = (await readFile(seen, "utf8")).trim().split(" ");
   assert.deepEqual(args.slice(-2), ["--protocol", REAP_PROTOCOL]);
   assert.equal(REAP_PROTOCOL, "2");
@@ -91,7 +91,7 @@ test("the core deletes only old unreferenced tool output, keeps messages and the
   await writeFile(path.join(session, "log/000002.payload.jsonl"), line({ key: "5.0", v: [{ type: "text", text: "current" }] }));
   await writeFile(path.join(session, "checkpoints/c1.json"), JSON.stringify({ id: "c1", through: 4,
     messages: [{ role: "user", content: [{ type: "text", text: "summary" }] }] }));
-  const result = await coreReap(session, REAP_AGE_SECONDS);
+  const result = await coreReap(session, REAP_AGE_SECONDS, { keepDetails: RECOVERY_DETAIL_FIELDS });
   assert.deepEqual(result.deleted, ["log/000001.payload.jsonl", "log/000001.reasoning.jsonl"]);
   assert.ok(result.bytes > 0);
   assert.ok(existsSync(path.join(session, "log/000001.jsonl")), "messages stay");
@@ -103,6 +103,21 @@ test("the core deletes only old unreferenced tool output, keeps messages and the
     assert.ok(RECOVERY_DETAIL_FIELDS.includes(field), `recovery's ${field} is kept`);
   }
   assert.ok(existsSync(path.join(session, "log/000002.payload.jsonl")), "the current chunk stays");
-  assert.deepEqual((await coreReap(session, REAP_AGE_SECONDS)).deleted, [], "a second pass finds nothing");
-  await assert.rejects(coreReap(path.join(dir, "missing"), REAP_AGE_SECONDS));
+  assert.deepEqual((await coreReap(session, REAP_AGE_SECONDS, { keepDetails: RECOVERY_DETAIL_FIELDS })).deleted, [], "a second pass finds nothing");
+  await assert.rejects(coreReap(path.join(dir, "missing"), REAP_AGE_SECONDS, { keepDetails: RECOVERY_DETAIL_FIELDS }));
+});
+
+test("a pass that cannot learn the fields recovery reads deletes nothing", async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "core-reaper-fields-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await mkdir(path.join(dir, "session-a"));
+  const runs = [], errors = [];
+  for (const recoveryFields of [async () => { throw new Error("reader failed"); }, async () => [], async () => ["a,b"]]) {
+    const reaper = new CoreReaper({ sessionsDirectory: dir, recoveryFields, onRun: (summary) => runs.push(summary),
+      logger: { error: (message) => errors.push(message) }, reap: async () => assert.fail("nothing may be deleted") });
+    await reaper.runOnce();
+  }
+  assert.deepEqual(runs.map((run) => run.failed), [1, 1, 1]);
+  assert.equal(errors.filter((message) => message.startsWith("core cleanup skipped")).length, 3);
+  assert.throws(() => new CoreReaper({ sessionsDirectory: dir }), /recoveryFields is required/);
 });

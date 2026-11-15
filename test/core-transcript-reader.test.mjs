@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CoreTranscriptReader } from "../src/core-transcript-reader.mjs";
+import { firstCompletedTitleTurn } from "../src/root-title.mjs";
 import { PROGRESS_ENTRY_TYPE } from "../src/progress-projection.mjs";
 import { AGENT_MESSAGE_ENTRY_TYPE } from "../src/agent-message-projection.mjs";
 
@@ -62,7 +63,7 @@ test("the title turn is the first completed exchange", async () => {
   const fake = core([user(1, [text(ask)]), reply(2, [text("Here is a day-by-day plan with huts, trail lengths and a weather fallback.")]), user(3, [text("Thanks")])]);
   const page = await new CoreTranscriptReader({ history: fake.history }).read({ sessionFile: "s", sessionId: "s", includeTitleTurn: true });
   assert.equal(page.titleUser, ask);
-  assert(page.titleTurn);
+  assert(firstCompletedTitleTurn(page.titleMessages), "the messages hold a completed title turn");
 });
 
 test("scroll-back pages reach the start of the history, through older chunks, without repeats", async () => {

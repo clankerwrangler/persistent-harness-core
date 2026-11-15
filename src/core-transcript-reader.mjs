@@ -1,8 +1,10 @@
-// What the supervisor shows and checks of a session, read through the core: the
-// session's current chunk as complete history entries (pi's entry shapes), projected
-// with the same functions that projected pi transcripts. It replaces the reader of pi's
-// files; it never opens the core's files itself.
+// A session's records as the supervisor is shown them, read through the core: the session's
+// current chunk (or an older range) as complete history entries, projected into visible
+// rows, what they prove about inputs and messages, and what search sees. Session code: the
+// supervisor runs it through the one-off reader (bin/session-records.mjs), never itself.
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { promisify } from "node:util";
 import { normalizeInputImages } from "./input-images.mjs";
 import {
   assistantMessageParts, associateVisibleInput, createActorInputAssociation, inputIdForEntry,
@@ -10,27 +12,67 @@ import {
 } from "./conversation-projection.mjs";
 import { projectAgentMessageEntry, selectIncomingFamilyMessages } from "./agent-message-projection.mjs";
 import { projectProgressEntry } from "./progress-projection.mjs";
-import { firstCompletedTitleTurn, rootTitleExcerpt } from "./root-title.mjs";
 import { boundVisibleHistory } from "./visible-page.mjs";
-import { sanitizePresentationText } from "./presentation-directive.mjs";
-import { coreSessionHistory } from "./core-session.mjs";
+import { PRESENTATION_HISTORY_PREFIX, sanitizePresentationText } from "./presentation-directive.mjs";
+import { coreBinary } from "./core-layout.mjs";
+import { RECOVERY_DETAIL_FIELDS } from "./python-recovery-fields.mjs";
+
+const exec = promisify(execFile);
+const MAX_OUTPUT = 512 * 1024 * 1024;
+const ROLES = new Set(["user", "assistant"]);
+const MAX_TITLE_TEXT = 16 * 1024;
+
 
 export class CoreTranscriptReader {
-  constructor({ inputReceiptReader = null, history = coreSessionHistory } = {}) {
-    this.inputReceiptReader = inputReceiptReader;
+  /** `inputReceipts(ids, sessionId)`: a Map of the inputs' receipts (the supervisor's), or
+   * `inputReceiptReader(id, sessionId)` for one at a time. */
+  constructor({ inputReceiptReader = null, inputReceipts = null, history = coreSessionHistory } = {}) {
+    this.inputReceipts = inputReceipts
+      ?? (async (ids, sessionId) => new Map(ids.map((id) => [id, inputReceiptReader?.(id, sessionId) ?? null])));
     this.history = history;
+  }
+
+  /** The tool-result detail fields Python recovery reads, which cleanup must keep. */
+  recoveryFields() { return [...RECOVERY_DETAIL_FIELDS]; }
+
+  /** What search sees of entries `from`..`to`: the user and assistant messages' visible
+   * text, and the newest entry number read (`last`, null when there were none). */
+  async searchable(sessionFile, { from = 0, to = Number.MAX_SAFE_INTEGER } = {}, sanitizePresentation = false) {
+    const entries = await this.history(sessionFile, { from, to });
+    if (!Array.isArray(entries)) throw new Error("the core did not return history");
+    let last = null; const messages = [];
+    for (const entry of entries) {
+      const n = entryNumber(entry);
+      if (n === undefined || n < from || n > to) continue;
+      last = Math.max(last ?? n, n);
+      const message = searchableMessage(entry, sanitizePresentation);
+      if (message) messages.push(message);
+    }
+    return { last, messages };
+  }
+
+  /** The receipts of the inputs these entries name that are not in `known` yet, added to it. */
+  async #receipts(entries, sessionId, inputIds, known) {
+    const wanted = new Set();
+    for (const entry of entries) {
+      const inputId = inputIdForEntry(entry);
+      if (typeof inputId !== "string" || !inputId || inputId.length > 128 || (inputIds && !inputIds.has(inputId)) || known.has(inputId)) continue;
+      wanted.add(inputId);
+    }
+    if (wanted.size) for (const [id, receipt] of await this.inputReceipts([...wanted], sessionId)) known.set(id, receipt);
+    return known;
   }
 
   // Each read asks the core; nothing is cached, so there is nothing to clear.
   clear() {}
 
-  #associations(entries, sessionId, inputIds) {
+  #associations(entries, sessionId, inputIds, receipts) {
     const groups = new Map();
     for (const entry of entries) {
       const inputId = inputIdForEntry(entry);
       if (typeof inputId !== "string" || !inputId || inputId.length > 128 || (inputIds && !inputIds.has(inputId))) continue;
       if (!groups.has(inputId)) groups.set(inputId, createActorInputAssociation({ sessionId,
-        inputReceipt: this.inputReceiptReader?.(inputId, sessionId) }));
+        inputReceipt: receipts.get(inputId) ?? undefined }));
       groups.get(inputId).add(entry);
     }
     return new Map([...groups].map(([inputId, association]) => [inputId, association.result()]));
@@ -75,7 +117,7 @@ export class CoreTranscriptReader {
       const from = Math.max(0, before - span);
       const entries = (await this.history(sessionFile, { from, to: before - 1 }))
         .filter((entry) => { const n = entryNumber(entry); return n !== undefined && n >= from && n < before; });
-      if (from === 0 || project(entries).length >= maxMessages) return entries;
+      if (from === 0 || (await project(entries)).length >= maxMessages) return entries;
     }
   }
 
@@ -84,14 +126,16 @@ export class CoreTranscriptReader {
     familyMessageId = null, familyDeliveryOnly = false, before = null } = {}) {
     const inputIds = Array.isArray(inputProofIds) ? new Set(inputProofIds) : null;
     const options = { sanitizePresentation, publicView, allowToolImages };
-    const project = (entries, entryOf) => this.#items(entries, this.#associations(entries, sessionId, inputIds), options, entryOf);
+    const receipts = new Map();
+    const project = async (entries) => this.#items(entries,
+      this.#associations(entries, sessionId, inputIds, await this.#receipts(entries, sessionId, inputIds, receipts)), options);
     // The current chunk, or for scroll-back the entries older than the cursor.
     const cursor = before === null || before === undefined ? null : Number(before);
     if (cursor !== null && !(Number.isSafeInteger(cursor) && cursor >= 0 && String(cursor) === String(before))) {
       throw new Error("history cursor is invalid");
     }
     const entries = cursor === null ? await this.history(sessionFile) : await this.#older(sessionFile, cursor, project, maxMessages);
-    const associations = this.#associations(entries, sessionId, inputIds);
+    const associations = this.#associations(entries, sessionId, inputIds, await this.#receipts(entries, sessionId, inputIds, receipts));
     const entryOf = new Map();
     const items = this.#items(entries, associations, options, entryOf);
     const page = boundVisibleHistory(items, { maxMessages, maxBytes });
@@ -100,7 +144,7 @@ export class CoreTranscriptReader {
     const shown = page.history.map((item) => entryOf.get(item.id)).filter(Number.isSafeInteger);
     const oldest = shown.length ? Math.min(...shown) : entryNumber(entries[0]);
     const hasMore = Number.isSafeInteger(oldest) && oldest > 0;
-    const title = includeTitleTurn ? titleOf(items) : {};
+    const title = includeTitleTurn ? titleMessagesOf(items) : {};
     const familyMessages = {};
     for (const item of items) {
       if (item.kind !== "agent_message" || item.direction !== "from" || !item.familyMessageId) continue;
@@ -132,17 +176,55 @@ export class CoreTranscriptReader {
   }
 }
 
-function titleOf(items) {
+/** What the supervisor picks a root's title from: the visible messages in order (assistant
+ * text without presentation directives), and the first user message. */
+function titleMessagesOf(items) {
   const messages = items.filter((item) => item.kind === "message").map((item) => item.message);
   const firstUser = messages.find((message) => message.role === "user");
-  const usable = messages.filter((message) => !(message.role === "user" && message.text.startsWith("Automated post-restart continuation:")))
-    .map((message) => message.role === "assistant" ? { ...message, text: sanitizePresentationText(message.text).text } : message);
-  const turn = firstCompletedTitleTurn(usable);
-  return { titleTurn: turn ? rootTitleExcerpt(turn) : null, titleUser: firstUser?.text ?? null };
+  const clip = (text) => String(text ?? "").slice(0, MAX_TITLE_TEXT);
+  const titleMessages = messages.filter((message) => !(message.role === "user" && message.text.startsWith("Automated post-restart continuation:")))
+    .map((message) => ({ role: message.role, text: clip(message.role === "assistant" ? sanitizePresentationText(message.text).text : message.text) }));
+  return { titleMessages, titleUser: firstUser?.text ?? null };
 }
 
 /** An entry's number in its session's history (the core names entries by number). */
 function entryNumber(entry) {
   const n = Number(entry?.id);
   return typeof entry?.id === "string" && Number.isSafeInteger(n) && n >= 0 && String(n) === entry.id ? n : undefined;
+}
+
+/** History entries of a session that is not running: its current chunk, or `from`..`to`. */
+export async function coreSessionHistory(sessionFile, { from, to } = {}, env = process.env) {
+  const args = from === undefined ? ["history", sessionFile] : ["history", sessionFile, String(from), String(to ?? Number.MAX_SAFE_INTEGER)];
+  const { stdout } = await exec(coreBinary(env), args, { env, maxBuffer: MAX_OUTPUT });
+  const entries = JSON.parse(stdout);
+  if (!Array.isArray(entries)) throw new Error("the core did not return history");
+  return entries;
+}
+
+
+/** What search sees of an entry: a user or assistant message's visible text, as shown. */
+function searchableMessage(entry, sanitizePresentation) {
+  const message = projectVisibleMessage(entry, { sanitizePresentation });
+  if (!message || !ROLES.has(message.role) || entryNumber(entry) === undefined) return undefined;
+  let text = sanitizeSessionHistoryText(message.text);
+  if (sanitizePresentation && message.role === "assistant") text = text.replace(PRESENTATION_HISTORY_PREFIX, "");
+  if (!text.trim()) return undefined;
+  return { id: entry.id, n: entryNumber(entry), role: message.role, text, createdAt: message.createdAt };
+}
+
+/** Remove terminal escape sequences and non-printing controls while preserving plain layout. */
+export function sanitizeSessionHistoryText(value) {
+  return String(value ?? "")
+    .replace(/\r\n?/gu, "\n")
+    // Operating-system command strings, terminated by BEL or string terminator.
+    .replace(/\u001B\][\s\S]*?(?:\u0007|\u001B\\)/gu, "")
+    // Control Sequence Introducer (7-bit ESC [ and 8-bit C1 forms).
+    .replace(/(?:\u001B\[|\u009B)[0-?]*[ -/]*[@-~]/gu, "")
+    // Remaining two-byte ANSI escape functions.
+    .replace(/\u001B[@-_]/gu, "")
+    // C0/C1 controls other than tab, LF, and CR.
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu, "")
+    // Bidirectional layout controls can visually reorder otherwise plain text.
+    .replace(/[؜‎‏‪-‮⁦-⁩]/gu, "");
 }

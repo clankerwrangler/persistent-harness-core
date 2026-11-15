@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { coreAuthArgs, coreSignIn, coreUsage } from "../src/core-account.mjs";
-import { coreArgs, coreBinary, coreLibraryPath, coreSessionsDirectory } from "../src/core-session.mjs";
+import { coreArgs, coreBinary, coreLibraryPath, coreSessionsDirectory } from "../src/core-layout.mjs";
 
 /** A stand-in core: records its arguments, then answers as FAKE_MODE says. */
 async function fakeCore(t) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { SESSION_ENTRY, SUPERVISOR_ENTRY, deployScope, moduleGraph, moduleReferences } from "../src/deploy-scope.mjs";
+import { SESSION_ENTRIES, SUPERVISOR_ENTRY, deployScope, moduleGraph, moduleReferences } from "../src/deploy-scope.mjs";
 
 const repository = new URL("../", import.meta.url);
 const read = (file) => { try { return readFileSync(new URL(file, repository), "utf8"); } catch { return null; } };
@@ -12,20 +12,25 @@ test("references cover static, dynamic and worker loads, not packages", () => {
   assert.deepEqual(moduleReferences(source).sort(), ["./a.mjs", "./b.mjs", "./c.mjs", "./d.mjs", "./e.mjs", "./f.mjs"]);
 });
 
-test("the supervisor never loads the session entry or session-only code", () => {
-  const supervisor = moduleGraph(SUPERVISOR_ENTRY, read), session = moduleGraph(SESSION_ENTRY, read);
+test("the supervisor never loads the session programs or session-only code", () => {
+  const supervisor = moduleGraph(SUPERVISOR_ENTRY, read), session = moduleGraph(SESSION_ENTRIES, read);
   assert(supervisor.has("src/supervisor.mjs") && session.has("src/core-worker.mjs"));
-  for (const file of [SESSION_ENTRY, "src/core-worker.mjs", "src/python-recovery.mjs", "src/kernel.mjs", "src/grep-worker.mjs"]) {
+  for (const file of [...SESSION_ENTRIES, "src/core-worker.mjs", "src/python-recovery.mjs", "src/kernel.mjs", "src/grep-worker.mjs",
+    "src/core-transcript-reader.mjs", "src/python-recovery-fields.mjs"]) {
     assert.equal(supervisor.has(file), false, `${file} is session-only`);
   }
   assert(session.has("src/grep-worker.mjs"), "a worker started by URL is part of the graph");
   assert(supervisor.has("src/protocol.mjs") && session.has("src/protocol.mjs"), "the shared wire format belongs to both");
+  // The supervisor starts each session program by its path, so the list must name them all.
+  const started = [...supervisor].map(read).join("\n");
+  for (const entry of SESSION_ENTRIES) assert(started.includes(`"${entry.split("/").pop()}"`), `the supervisor starts ${entry}`);
 });
 
 test("a change is as wide as its widest file", () => {
-  const graphs = { supervisorFiles: moduleGraph(SUPERVISOR_ENTRY, read), sessionFiles: moduleGraph(SESSION_ENTRY, read) };
+  const graphs = { supervisorFiles: moduleGraph(SUPERVISOR_ENTRY, read), sessionFiles: moduleGraph(SESSION_ENTRIES, read) };
   assert.equal(deployScope(["test/x.test.mjs", "docs/a.md"], graphs).scope, "none");
   assert.equal(deployScope(["src/python-recovery.mjs", "test/x.test.mjs"], graphs).scope, "session");
+  assert.equal(deployScope(["src/core-transcript-reader.mjs", "bin/session-records.mjs"], graphs).scope, "session", "how records are read is the session half's");
   assert.equal(deployScope(["src/python-recovery.mjs", "src/protocol.mjs"], graphs).scope, "full");
   assert.equal(deployScope(["src/supervisor.mjs"], graphs).scope, "full");
   assert.equal(deployScope(["package.json"], graphs).scope, "full", "dependencies are shared");

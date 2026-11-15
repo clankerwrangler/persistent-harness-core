@@ -3,7 +3,7 @@
 // use the same core and credentials file as sessions (see coreArgs).
 import { execFile, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { coreArgs, coreBinary } from "./core-session.mjs";
+import { coreArgs, coreBinary } from "./core-layout.mjs";
 
 const USAGE_TIMEOUT_MS = 20_000;
 

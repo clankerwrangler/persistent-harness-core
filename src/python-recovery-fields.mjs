@@ -1,6 +1,5 @@
-// What Python recovery reads from tool results. Both the session's recovery check and the
-// supervisor's cleanup of old tool output use this, so it lives apart from the recovery code,
-// which only sessions load.
+// What Python recovery reads from tool results. Session code: the supervisor's cleanup of old
+// tool output asks the session half for RECOVERY_DETAIL_FIELDS (bin/session-records.mjs).
 export const SELECT = Object.freeze({
   where: { role: "toolResult", toolName: "ipython" },
   fields: ["role", "toolCallId", "toolName", "isError"],

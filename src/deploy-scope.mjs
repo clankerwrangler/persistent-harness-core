@@ -1,12 +1,14 @@
 // Which kind of deploy a change needs. The supervisor loads its code once and keeps it;
-// each session process loads its code from the checkout when it starts. So a change that
+// session code is loaded from the checkout each time it runs: a session process when it
+// starts, and the one-off records reader for each read. So a change that
 // touches only session code reaches every session as it next starts, with the supervisor
 // left running ("session"); a change to anything the supervisor has loaded, or may load
 // later, needs the supervisor restarted ("full"); tests and documents need neither ("none").
 import path from "node:path";
 
 export const SUPERVISOR_ENTRY = "bin/harness-supervisor.mjs";
-export const SESSION_ENTRY = "bin/core-actor.mjs";
+/** The session half's programs, which the supervisor starts (never imports). */
+export const SESSION_ENTRIES = Object.freeze(["bin/core-actor.mjs", "bin/session-records.mjs"]);
 const RANK = { none: 0, session: 1, full: 2 };
 // Skills are read at run time even though they are documents, so they are not listed here.
 const NO_RUNTIME = [/^test\//, /^docs\//, /^specification\//, /^[^/]+\.md$/, /^\.gitignore$/, /^LICENSE$/];
@@ -24,9 +26,10 @@ export function moduleReferences(source) {
   return [...found];
 }
 
-/** Every repository file reachable from `entry`; `read(path)` returns a file's text or null. */
+/** Every repository file reachable from `entry` (one path or several); `read(path)` returns a
+ * file's text or null. */
 export function moduleGraph(entry, read) {
-  const seen = new Set(), queue = [entry];
+  const seen = new Set(), queue = [entry].flat();
   while (queue.length) {
     const file = queue.pop();
     if (seen.has(file)) continue;

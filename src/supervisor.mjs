@@ -43,18 +43,19 @@ import { captureOwnedProcessIdentity, terminateOwnedProcess } from "./process-ow
 import { normalizeProgressHeading } from "./progress-projection.mjs";
 import { PresentationDirectiveFilter, sanitizePresentationText } from "./presentation-directive.mjs";
 import { RootOutputProjector } from "./root-output-projector.mjs";
-import { agentDirectory, coreSessionContext, coreSessionsDirectory, createCoreSession, forkableContext, removeCoreSession } from "./core-session.mjs";
+import { coreSessionContext, createCoreSession, forkableContext, removeCoreSession } from "./core-session.mjs";
+import { agentDirectory, coreSessionsDirectory } from "./core-layout.mjs";
 import { sessionSidecarPaths, publishActorGenerationSkillGrant } from "./session-paths.mjs";
 import { SessionHistoryIndex } from "./session-history-index.mjs";
 import { retryIntentForRequest, SESSION_ACTION_TIMEOUT_MS } from "./session-actions.mjs";
 import { DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS, SessionProcess, createSessionCompileCache } from "./session-process.mjs";
 import { SESSION_COMPILE_CACHE_ENV } from "./session-channel.mjs";
-import { CoreTranscriptReader } from "./core-transcript-reader.mjs";
+import { SessionRecords } from "./session-records.mjs";
 import { HarnessStore } from "./store.mjs";
 import { HomeFailureNudge } from "./home-failure-nudge.mjs";
 import { PythonRuntimeManager, runtimeVersions } from "./python-runtime.mjs";
 import { discoverSkills, discoverSkillsFromDirectory, grantedManifestSkills, materializeSkills, skillCatalogForSkills } from "./skills.mjs";
-import { defaultRootName, resolveRootTitle, firstCompletedTitleTurn } from "./root-title.mjs";
+import { defaultRootName, resolveRootTitle, firstCompletedTitleTurn, rootTitleExcerpt } from "./root-title.mjs";
 import { createRootTitleGenerator } from "./root-title-generator.mjs";
 
 const PACKAGE_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -540,8 +541,10 @@ export class HarnessSupervisor {
     if (!Number.isInteger(maxLogBytes) || maxLogBytes < 4096 || maxLogBytes > 64 * 1024 * 1024) throw new Error("maxLogBytes must be from 4096 through 67108864");
     if (!Number.isInteger(cronTickIntervalMs) || cronTickIntervalMs < 100 || cronTickIntervalMs > 60 * 60 * 1000) throw new Error("cronTickIntervalMs must be from 100 through 3600000");
     if (!Number.isInteger(cronMaxParallel) || cronMaxParallel < 1 || cronMaxParallel > 32) throw new Error("cronMaxParallel must be from 1 through 32");
-    this.transcriptReader ??= new CoreTranscriptReader({ inputReceiptReader: (inputId, sessionId) =>
-      this.store.getActorInput(inputId, sessionId, { includeDigest: true }) });
+    // A session's records are read by the session half; the supervisor answers with its receipts.
+    this.transcriptReader ??= new SessionRecords({ inputReceiptReader: (inputId, sessionId) =>
+      this.store.getActorInput(inputId, sessionId, { includeDigest: true }),
+      compileCache: () => (this.#actorCompileCache ??= createSessionCompileCache()) });
     if (!Number.isInteger(backgroundCompletionIntervalMs) || backgroundCompletionIntervalMs < 100 || backgroundCompletionIntervalMs > 60 * 60 * 1000) throw new Error("backgroundCompletionIntervalMs must be from 100 through 3600000");
     this.#stoppedPromise = new Promise((resolve) => { this.#resolveStopped = resolve; });
   }
@@ -569,9 +572,9 @@ export class HarnessSupervisor {
       if (!this.sessionHistoryIndex) {
         try {
           this.sessionHistoryIndex = this.sessionHistoryIndexFactory({
-            // Session history is read through the core, as the transcript reader reads it.
+            // What search sees of a session is the session half's to say, as for its pages.
             databasePath: path.join(path.dirname(this.databasePath), "transcript-search.sqlite"),
-            history: (sessionFile, range) => (this.transcriptReader.history ?? coreSessionHistory)(sessionFile, range),
+            searchable: (sessionFile, range, sanitizePresentation) => this.transcriptReader.searchable(sessionFile, range, sanitizePresentation),
           });
           this.#sessionHistoryDiagnostic = undefined;
         } catch (error) {
@@ -618,6 +621,7 @@ export class HarnessSupervisor {
       });
       this.#backgroundCompletionMonitor.start();
       this.#coreReaper = this.coreReaperFactory?.({ sessionsDirectory: this.coreSessionsDirectory, logger: this.logger,
+        recoveryFields: () => this.transcriptReader.recoveryFields(),
         onRun: (summary) => this.#log("core_cleanup", summary) });
       this.#coreReaper?.start();
       this.#notificationTimer = setInterval(() => {
@@ -1767,7 +1771,8 @@ export class HarnessSupervisor {
         sessionFile: session.sessionFile, sessionId, maxMessages: 32, maxBytes: 24 * 1024, sanitizePresentation: true, includeTitleTurn: true, familyDeliveryOnly: true,
       });
       const firstReply = this.#actors.get(sessionId)?.liveConversation.snapshot().find((message) => message.status === "complete" && message.text.trim());
-      const turn = transcript.titleTurn ?? (transcript.titleUser && firstReply ? firstCompletedTitleTurn([
+      const titled = firstCompletedTitleTurn(transcript.titleMessages ?? []);
+      const turn = titled ? rootTitleExcerpt(titled) : (transcript.titleUser && firstReply ? firstCompletedTitleTurn([
         { role: "user", text: transcript.titleUser }, firstReply,
       ]) : null);
       if (!turn) return;

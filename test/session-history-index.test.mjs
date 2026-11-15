@@ -5,6 +5,10 @@ import path from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { SessionHistoryIndex, SESSION_HISTORY_SCHEMA_VERSION, parseSessionHistoryQuery } from "../src/session-history-index.mjs";
+import { CoreTranscriptReader } from "../src/core-transcript-reader.mjs";
+
+/** What search sees, as the session half says it, over a stand-in for the core's history. */
+const searchableOver = (history) => { const reader = new CoreTranscriptReader({ history }); return (...args) => reader.searchable(...args); };
 
 const at = (n) => new Date(Date.UTC(2026, 10, 9, 8, 0, n)).toISOString();
 const say = (n, role, text, extra = []) => ({ type: "message", id: String(n), timestamp: at(n),
@@ -28,7 +32,7 @@ async function fixture(t, history) {
   const root = await mkdtemp(path.join(os.tmpdir(), "session-history-index-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const databasePath = path.join(root, "history.sqlite");
-  const open = () => { const index = new SessionHistoryIndex({ databasePath, history }); t.after(() => index.close()); return index; };
+  const open = () => { const index = new SessionHistoryIndex({ databasePath, searchable: searchableOver(history) }); t.after(() => index.close()); return index; };
   return { root, databasePath, open };
 }
 const source = (id, extra = {}) => ({ sessionId: id, sessionFile: `/sessions/${id}`, ...extra });

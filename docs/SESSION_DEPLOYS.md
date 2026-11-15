@@ -4,9 +4,14 @@ The supervisor loads its code once, when it starts, and keeps it. Each session p
 (`bin/core-actor.mjs`) loads its code from the checkout every time the session starts,
 and a quiet session stops after `actorInactivityMs` (ten minutes by default).
 
+The supervisor never reads a session's conversation records itself. For history pages,
+search, titles and input checks it starts the session half's one-off reader
+(`bin/session-records.mjs`), which loads its code fresh for each read and exits.
+
 So a change that touches only session code can be deployed without restarting the
 supervisor: move the checkout to the new commit, and every session runs the new code
-from its next start. A session already running finishes on the code it loaded.
+from its next start. A session already running finishes on the code it loaded. What the
+supervisor is shown of every session's records follows the new code at once.
 
 `node bin/deploy-scope.mjs <running-commit> [<new-commit>]` says which deploy a change
 needs:

@@ -11,7 +11,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { agentDirectory, coreArgs, coreBinary, coreLibraryPath } from "./core-session.mjs";
+import { agentDirectory, coreArgs, coreBinary, coreLibraryPath } from "./core-layout.mjs";
 import { HarnessClient } from "./client.mjs";
 import { SESSION_CHANNEL_VERSION } from "./session-channel.mjs";
 import { PythonKernel } from "./kernel.mjs";

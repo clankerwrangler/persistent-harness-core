@@ -10,5 +10,8 @@ export const SESSION_CHANNEL_VERSION = 3;
 export const MAX_SESSION_LINE_BYTES = 256 * 1024 * 1024;
 /** Environment variable naming the session process's code cache directory, if any. */
 export const SESSION_COMPILE_CACHE_ENV = "PI_HARNESS_ACTOR_COMPILE_CACHE";
+/** The one-off records reader (bin/session-records.mjs) takes requests of this version: one
+ * `{ version, op, ... }` line in, `receipts` questions and answers, one `result` or `error` out. */
+export const SESSION_RECORDS_VERSION = 1;
 
 export function sessionLineDecoder() { return new JsonLineDecoder({ maxFrameBytes: MAX_SESSION_LINE_BYTES }); }
