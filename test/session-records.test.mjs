@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { spawn } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -96,4 +97,17 @@ test("stopping ends the reads still running before their code cache can go, and 
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "the reader has exited when close returns");
   await assert.rejects(reading, /stopped without answering/);
   await assert.rejects(records.read({ sessionFile: path.join(dir, "s"), sessionId: "s" }), /supervisor is stopping/);
+});
+
+test("stopping while a reader fails to start still finishes, and the read reports the failure", { timeout: 20_000 }, async () => {
+  let closing;
+  const records = new SessionRecords({ command: "/nonexistent/records-reader", spawn: (...args) => {
+    const child = spawn(...args);
+    // Its spawn error comes on a later tick; stopping begins before it.
+    queueMicrotask(() => { closing = records.close(); });
+    return child;
+  } });
+  await assert.rejects(records.read({ sessionFile: "/nonexistent/s", sessionId: "s" }), { code: "ENOENT" });
+  await closing;
+  await assert.rejects(records.read({ sessionFile: "/nonexistent/s", sessionId: "s" }), /supervisor is stopping/);
 });
