@@ -2,7 +2,7 @@
 
 Persistent Harness runs durable, detachable sessions on the conversation core, with persistent Python execution. A local supervisor owns session workers, input queues, retained child agents, and kernel recovery. Closing a terminal detaches the client; it does not stop the session.
 
-This repository contains the harness and ten capability skills. The conversation core (the program that keeps each session's history and talks to the model providers) is a separate project.
+This repository contains the harness and ten capability skills. The [conversation core](https://github.com/clankerwrangler/conversation-core), which keeps each session's history and talks to model providers, is a separate project.
 
 ## Install
 
@@ -10,7 +10,7 @@ Requirements:
 
 - Linux with `/proc`, Node.js 24 or newer, Bash, Perl, and standard Unix utilities.
 - The conversation core: its `core` binary and its JavaScript library `js/core.mjs`. See [Dependencies](docs/DEPENDENCIES.md#conversation-core).
-- CPython 3.12.12, IPython 9.10.0, and dill 0.3.8, either provisioned by the harness or supplied explicitly.
+- A compatible Python interpreter with IPython, dill, and the skill dependencies. On Linux x64, the harness can provision its managed runtime.
 
 Follow [Dependencies and installation](docs/DEPENDENCIES.md) to point the harness at the core and configure the Python runtime. Then, from this checkout:
 
@@ -20,9 +20,9 @@ node bin/provision-skills.mjs --yes
 node bin/harness.mjs --create
 ```
 
-The provisioning command approves downloads of pinned uv, Python, IPython, and dill. Set `PI_HARNESS_PYTHON` to a compatible existing interpreter instead if provisioning is not wanted. The nine Python-backed skills declare no additional Python packages; `inbox` is guidance-only.
+The provisioning command approves downloads of uv and the pinned Python, IPython, and dill versions, along with any skill dependencies. Set `PI_HARNESS_PYTHON` to a compatible existing interpreter instead if provisioning is not wanted. The nine bundled Python-backed skills declare no additional Python packages; `inbox` is guidance-only.
 
-Provider sign-ins belong to the core: sign in with `core login PROVIDER`, and the core stores and renews the credentials itself. The harness never reads them.
+Provider sign-ins belong to the core. Follow the [sign-in steps](docs/DEPENDENCIES.md#provider-sign-in) to use the same credentials file as harness sessions; the core stores and renews the credentials.
 
 ## Use
 
