@@ -1,10 +1,10 @@
 ------------------------- MODULE ActorCompileCache -------------------------
 \* Sources:
 \*   src/actor-compile-cache.mjs sha256:187288f62fa5fd6d36f5d6aa272db7e020a46ac284ef36333a20f06b4f34cf67
-\*   src/supervisor.mjs sha256:399af6a6b9ea4c75e9000de91f0ccc9af6e25d8dcf9477400229cb69d060af4e
+\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
 \*   bin/core-actor.mjs sha256:c7b601d33fa058e7d8fa3dce7d2131f561ac2aed0cff6234e029207bb7281cda
 \*   src/session-process.mjs sha256:fc18d784685a5f20f85819c29a192e3931a161870b0044df60e68a757dde7bfe
-\*   src/session-records.mjs sha256:bc1ff9ac4a91b5cd6c7a28a83f84be78b054caf65f6cf8cec48a5ed8018c09f4
+\*   src/session-records.mjs sha256:8a3cc7904feac37c8fc8f5bf22f5545dba5b0bbe2851964ab0cc19435264a126
 
 EXTENDS Naturals, FiniteSets
 \* One disposable code cache per supervisor, used by each core actor worker it starts.

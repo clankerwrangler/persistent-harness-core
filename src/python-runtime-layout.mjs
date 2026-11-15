@@ -24,6 +24,12 @@ export function assertManagedVersions(versions) {
   }
 }
 
+/** Where the runtimes live by default, for an agent directory. */
+export function runtimeDirectory(agentDir) { return path.join(agentDir, "harness", "kernel-runtime"); }
+
+/** The supervisor tells each session process where it installs runtimes, so both use one folder. */
+export const RUNTIME_DIRECTORY_ENV = "PI_HARNESS_KERNEL_RUNTIME_DIR";
+
 /** The environment a set of skills needs, named by what goes into it. */
 export function runtimeEnvironment(runtimeDir, skills) {
   const dependencies = [...new Set(skills.flatMap((skill) => skill.python?.dependencies ?? []))].sort();

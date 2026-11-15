@@ -1,7 +1,7 @@
 ---- MODULE PythonRecoveryGuard ----
 \* Sources:
 \*   src/python-recovery.mjs sha256:4a00d7b21f01b33957713d8ef5107338e2f840147495eadbbd88c27894754275
-\*   src/core-worker.mjs sha256:45e0bff2f093ae99c979e1e9407168ec197e16ead5751a4082d7be6ff46ba91a
+\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
 
 \* A request can be prepared, sent, then the kernel can be replaced before a
 \* Python call from that request arrives. Only a diagnostic for the current

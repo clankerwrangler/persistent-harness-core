@@ -7,7 +7,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, link, lstat, mkdir, readFile, readlink, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveChildLaunchPolicy } from "./child-policy.mjs";
@@ -48,6 +47,7 @@ import { SessionRecords } from "./session-records.mjs";
 import { HarnessStore } from "./store.mjs";
 import { HomeFailureNudge } from "./home-failure-nudge.mjs";
 import { PythonRuntimeManager, runtimeVersions } from "./python-runtime.mjs";
+import { RUNTIME_DIRECTORY_ENV, runtimeDirectory } from "./python-runtime-layout.mjs";
 import { discoverSkills, discoverSkillsFromDirectory, grantedManifestSkills, materializeSkills, skillCatalogForSkills } from "./skills.mjs";
 import { defaultRootName, resolveRootTitle, firstCompletedTitleTurn, rootTitleExcerpt } from "./root-title.mjs";
 import { createRootTitleGenerator } from "./root-title-generator.mjs";
@@ -57,7 +57,6 @@ const CORE_ACTOR_WORKER = path.join(PACKAGE_ROOT, "bin", "core-actor.mjs");
 // A busy actor otherwise grows its young generation to 64 MB, mostly empty; 4 MB semispaces measured smaller and no slower.
 const ACTOR_NODE_FLAGS = ["--expose-gc", "--max-semi-space-size=4"];
 const DEFAULT_SKILLS_PATH = path.resolve(path.join(PACKAGE_ROOT, "skills"));
-const DEFAULT_RUNTIME_DIR = path.join(process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"), "harness", "kernel-runtime");
 const SOCKET_OUTPUT_HEADROOM_BYTES = 256 * 1024;
 const MAX_IN_FLIGHT_REQUESTS = 8192;
 const COMPLETED_REQUEST_ID_CACHE_SIZE = 4096;
@@ -453,7 +452,7 @@ export class HarnessSupervisor {
     configuredChildModel = process.env.PI_HARNESS_CHILD_MODEL || null,
     configuredChildThinkingLevel = process.env.PI_HARNESS_CHILD_THINKING || null,
     skillsPath = process.env.PI_HARNESS_SKILLS_PATH || DEFAULT_SKILLS_PATH,
-    runtimeDir = DEFAULT_RUNTIME_DIR,
+    runtimeDir = runtimeDirectory(agentDirectory()),
     runtimeProvisioner = null,
     actorFactory = (options) => new SessionProcess(options),
     transcriptReader = null,
@@ -2165,6 +2164,7 @@ export class HarnessSupervisor {
     const env = { ...process.env, PI_HARNESS_SOCKET: this.socketPath, PI_HARNESS_AUTO_START: "0", PI_HARNESS_ACTOR_ID: session.sessionId, PI_HARNESS_ACTOR_TOKEN: session.actorToken, PI_HARNESS_ACTOR_GENERATION: String(session.actorGeneration) };
     env.PI_HARNESS_ROOT_SESSION_ID = scratch.rootSessionId;
     env.PI_HARNESS_SCRATCH_DIRECTORY = scratch.directory;
+    env[RUNTIME_DIRECTORY_ENV] = this.runtimeDir;
     delete env.PI_SESSION_ID; delete env.PI_SESSION_FILE;
     delete env[SESSION_COMPILE_CACHE_ENV];
     if (compileCache) env[SESSION_COMPILE_CACHE_ENV] = compileCache.directory;

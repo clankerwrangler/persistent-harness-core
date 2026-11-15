@@ -1,10 +1,10 @@
 -------------------- MODULE KernelLaunchValidation --------------------
 \* Sources:
 \*   src/python-launch.mjs sha256:94f072c9d2a8dc1a8b048a4bfb840c61daf73990c8164716283f3aebb3b651e1
-\*   src/python-runtime-layout.mjs sha256:5a25d86ac7872e8a4933fafe3c2389cf612d1e347f697109b5802b4cd4bb9725
+\*   src/python-runtime-layout.mjs sha256:97b21d1ea5c77f195b76805883d37fd7bd77187a845fcfb120e8bc3b5c852fcd
 \*   src/python-runtime.mjs sha256:f6655f5ca478197e78b8744a7f3c62bca66cd17d25d5f7ee8e565c3f7a5003fb
 \*   src/kernel.mjs sha256:b3a52680c0e061db087bd674a0874fcb87e1793b532cd494b58d9631c88c2063
-\*   src/core-worker.mjs sha256:45e0bff2f093ae99c979e1e9407168ec197e16ead5751a4082d7be6ff46ba91a
+\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
 \*   python-runtime/kernel.py sha256:d4aa99006f90d531b546686f6208dc48f77609f4faa00dabb91e7a81f80bc361
 \*   python-runtime/_persistent_harness.py sha256:c9bfdef5351102e88de2a6806b355ff3d6f4638516a7165d3bd779682042f9fb
 

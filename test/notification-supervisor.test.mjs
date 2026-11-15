@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fixture, delay, eventually } from "./fixtures/notification-supervisor.mjs";
 import { sessionSidecarPaths } from "../src/session-paths.mjs";
+import { RUNTIME_DIRECTORY_ENV } from "../src/python-runtime-layout.mjs";
 
 test("fixture close joins concurrent startup retirement before publishing stopped state", { timeout: 180000 }, async t => {
   const launchRead = Promise.withResolvers(), releaseLaunch = Promise.withResolvers(),
@@ -165,4 +166,13 @@ test("a test supervisor keeps the sessions it creates in its own folder and open
   const sessionFile = f.supervisor.store.getSession(admission.sessionId).sessionFile;
   assert(inside(sessionFile), `the root's records stay in the fixture: ${sessionFile}`);
   assert(inside(sessionSidecarPaths(sessionFile).basePath), "and so do its sidecars");
+});
+
+test("each session process is told the supervisor's runtime folder, custom or default", async t => {
+  const custom = await fixture(t, { runtimeDir: path.join(os.tmpdir(), "custom-kernel-runtime") });
+  const a = await custom.actor();
+  assert.equal(a.env[RUNTIME_DIRECTORY_ENV], path.join(os.tmpdir(), "custom-kernel-runtime"));
+  const plain = await fixture(t);
+  const b = await plain.actor();
+  assert.equal(b.env[RUNTIME_DIRECTORY_ENV], plain.supervisor.runtimeDir, "the default is passed the same way");
 });

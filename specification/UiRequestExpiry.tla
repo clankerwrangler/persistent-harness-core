@@ -1,6 +1,6 @@
 ---- MODULE UiRequestExpiry ----
 \* Sources:
-\*   src/supervisor.mjs sha256:399af6a6b9ea4c75e9000de91f0ccc9af6e25d8dcf9477400229cb69d060af4e
+\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
 
 \* A dialog's deadline passes before its cleanup timer runs. A response in that
 \* gap must be refused, because the actor has already stopped waiting.

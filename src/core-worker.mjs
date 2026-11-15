@@ -17,6 +17,7 @@ import { HarnessClient } from "./client.mjs";
 import { SESSION_CHANNEL_VERSION } from "./session-channel.mjs";
 import { PythonKernel } from "./kernel.mjs";
 import { launchPython } from "./python-launch.mjs";
+import { RUNTIME_DIRECTORY_ENV, runtimeDirectory } from "./python-runtime-layout.mjs";
 import { PythonRecovery } from "./python-recovery.mjs";
 import { createHostHandlers } from "./host-handlers.mjs";
 import { readActorSkillGrant } from "./skill-grant.mjs";
@@ -123,7 +124,7 @@ export class CoreWorker {
       stepsPath: options.sidecarBase ? `${options.sidecarBase}.python-steps.json` : undefined,
     });
     this.manifest = undefined;
-    this.runtimeDir = path.join(agentDir, "harness", "kernel-runtime");
+    this.runtimeDir = env[RUNTIME_DIRECTORY_ENV] || runtimeDirectory(agentDir);
     // The supervisor's shutdown drain waits for this.
     this.coordinator = { waitForIdle: () => core.idle() };
     // Failed turns are saved, then reported (the parent or Home hears of them), then the

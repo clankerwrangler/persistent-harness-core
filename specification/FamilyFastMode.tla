@@ -2,7 +2,7 @@
 \* Sources:
 \*   src/store.mjs sha256:a6ecb3526e086a1a4cb6dfab97009a3070f63c5d6ae0f038f2a2424ed6e3d225
 \*   src/model-capabilities.mjs sha256:40fe62270e3ad5dc60cc341cdbb4b32a4c1fb8f5ba574c2e7f1e4f38799abbd0
-\*   src/core-worker.mjs sha256:45e0bff2f093ae99c979e1e9407168ec197e16ead5751a4082d7be6ff46ba91a
+\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
 
 EXTENDS Naturals, FiniteSets
 CONSTANTS RootA, RootB, Child, Grandchild, NoRoot, Absent, Malformed, Unknown

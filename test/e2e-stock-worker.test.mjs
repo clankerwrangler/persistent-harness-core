@@ -113,35 +113,21 @@ async function stockWorkerCase(t, { copyPrerequisites = cp, seed = process.env.P
   pendingSetup = client.start({ registrationType: "register_client", clientInstanceId: crypto.randomUUID() });
   await pendingSetup; t.signal.throwIfAborted();
   diagnostic("client:ready");
-  // This fixture alone consents to its expected disposable runtime installation.
-  // Unexpected human requests fail the test; production approval remains untouched.
+  // Unexpected human requests fail the test; installation is the supervisor's approved plan.
   client.on("event", frame => {
     const e = frame.data?.event;
-    if (frame.event !== "actor_event" || e?.type !== "dialog_request" || !["confirm", "select", "input", "editor"].includes(e.method)) return;
-    diagnostic("consent:received");
-    void (async () => {
-      assert(admission && frame.data.sessionId === admission.sessionId);
-      assert.equal(e.method, "confirm"); assert.equal(e.title, "Install managed Python runtime?");
-      assert.equal(provisioningAnswered, false); assert.equal(typeof e.id, "string"); assert(e.id.length > 0);
-      assert.equal(process.env.PI_CODING_AGENT_DIR, agentDir); assert.equal(path.dirname(agentDir), root);
-      assert.equal(process.env.PI_HARNESS_PYTHON, undefined, "fixture must install inside its own agent directory");
-      assert.equal(e.message, expectedRuntimeMessage);
-      const current = supervisor.store.getSession(admission.sessionId);
-      assert(current.actorGeneration > 0 && current.lifecycle === "resident");
-      assert.equal(frame.data.actorGeneration, current.actorGeneration);
-      const snapshot = await client.request("subscribe_session", { selector: admission.sessionId, passive: true });
-      assert(snapshot.pendingUiRequests.some(request => request.id === e.id));
-      const notice = (await client.request("list_notifications")).notifications.find(n => n.source.requestId === e.id);
-      assert(notice); assert.equal(notice.state, "pending"); assert.equal(notice.kind, "attention");
-      assert.equal(notice.source.actorGeneration, current.actorGeneration);
-      // No conversation SSE clients exist; the first Python tool is still waiting.
-      assert.equal(current.activity, "working");
-      provisioningAnswered = true;
-      diagnostic("consent:reply:start");
-      await client.request("respond_dialog", { sessionId: admission.sessionId, uiRequestId: e.id, confirmed: true });
-      diagnostic("provisioning:pending");
-    })().catch(error => { provisioningError = error; });
+    if (frame.event === "actor_event" && e?.type === "dialog_request" && ["confirm", "select", "input", "editor"].includes(e.method)) {
+      provisioningError = new Error(`unexpected dialog: ${e.title ?? e.method}`);
+    }
   });
+  assert.equal(process.env.PI_CODING_AGENT_DIR, agentDir); assert.equal(path.dirname(agentDir), root);
+  assert.equal(process.env.PI_HARNESS_PYTHON, undefined, "fixture must install inside its own agent directory");
+  diagnostic("provisioning:plan");
+  const plan = await client.request("get_skill_runtime_plan", {});
+  assert.deepEqual(plan.packages, [`ipython==${IPYTHON_VERSION}`, `dill==${DILL_VERSION}`, ...dependencies]);
+  diagnostic("provisioning:pending");
+  await client.request("provision_skill_runtime", { fingerprint: plan.fingerprint });
+  provisioningAnswered = true;
   diagnostic("session:start");
   pendingSetup = client.request("create_root", { cwd, repositoryRoot: null, name: "stock-worker-smoke", provider: "harness-fake", model: "fake-model", thinkingLevel: null });
   ({ admission } = await pendingSetup); t.signal.throwIfAborted();

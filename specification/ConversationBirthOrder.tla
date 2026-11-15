@@ -2,7 +2,7 @@
 \* Sources:
 \*   src/conversation-projection.mjs sha256:76d0753210a8c364e3c6b0a22592f9b74cdd18a05f58ebb9f21ba32b6e8d167e
 \*   src/progress-projection.mjs sha256:7c1977d1717c97c90fb90bd6c6958516367957048c35862d85c591ac82702519
-\*   src/supervisor.mjs sha256:399af6a6b9ea4c75e9000de91f0ccc9af6e25d8dcf9477400229cb69d060af4e
+\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
 \*   src/live-view.mjs sha256:fa7a8846c1a485bd3f38084cd8ffe77f2c24b5066738f9ae21925d7cedd7dbf8
 \*   src/conversation-birth.mjs sha256:a2634f6138784dea843f9f0269f5e25b9db862c5c944fd443612aebedcfec402
 \*   src/pending-rows.mjs sha256:be5226e13a48758ceba2f106a7691ce14a3d1da99e0f734501f7814c0f27b8f9

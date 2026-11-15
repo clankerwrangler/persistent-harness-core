@@ -1,8 +1,8 @@
 -------------------- MODULE MemoryDiagnostics --------------------
 \* Sources:
 \*   src/kernel.mjs sha256:b3a52680c0e061db087bd674a0874fcb87e1793b532cd494b58d9631c88c2063
-\*   src/core-worker.mjs sha256:45e0bff2f093ae99c979e1e9407168ec197e16ead5751a4082d7be6ff46ba91a
-\*   src/supervisor.mjs sha256:399af6a6b9ea4c75e9000de91f0ccc9af6e25d8dcf9477400229cb69d060af4e
+\*   src/core-worker.mjs sha256:6a68d2aa971379810b37268a216ff90ee0d023e4f805432aa3c5e1da788a1925
+\*   src/supervisor.mjs sha256:834043fd3695b19d1be8dca80a1b0d944d9446874073b48452c29cc7430e53cd
 \*   src/protocol.mjs sha256:48b40e0384b3a637d65b909782657e23c29d57f069e09d083fb6d666306128d6
 EXTENDS Naturals, TLC
 CONSTANT IgnoreBusy, StartMissing, SkipReserve, MutateRead, BypassAuth
