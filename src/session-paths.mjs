@@ -1,6 +1,7 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { actorGenerationSkillGrantPath, skillGrantContent } from "./skill-grant.mjs";
 
 /**
  * Derive every harness-owned session-local path from the session's core folder: the
@@ -25,22 +26,9 @@ export function sessionSidecarPaths(sessionFile) {
 }
 
 
-export function actorGenerationSkillGrantPath(sessionFile, generation, digest) {
-  if (!Number.isSafeInteger(generation) || generation < 1 || typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)) {
-    throw new TypeError("invalid actor generation grant identity");
-  }
-  return `${sessionSidecarPaths(sessionFile).basePath}.generation-${generation}-${digest}.skill-grant.json`;
-}
-
-export function actorGenerationGrantIdentity(filePath) {
-  const match = path.basename(filePath).match(/\.generation-([1-9][0-9]*)-([a-f0-9]{64})\.skill-grant\.json$/);
-  if (!match || !Number.isSafeInteger(Number(match[1]))) throw new Error("invalid actor generation grant path");
-  return { generation: Number(match[1]), digest: match[2] };
-}
-
 export async function publishActorGenerationSkillGrant(session, grant) {
-  const content = `${JSON.stringify({ version: 1, sessionId: session.sessionId, actorGeneration: session.actorGeneration,
-    skills: grant.skills, capabilities: grant.capabilities }, null, 2)}\n`;
+  const content = skillGrantContent({ sessionId: session.sessionId, actorGeneration: session.actorGeneration,
+    skills: grant.skills, capabilities: grant.capabilities, manifestSkills: grant.manifestSkills });
   const digest = createHash("sha256").update(content).digest("hex");
   const filePath = actorGenerationSkillGrantPath(session.sessionFile, session.actorGeneration, digest);
   await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });

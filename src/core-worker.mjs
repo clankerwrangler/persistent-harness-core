@@ -6,7 +6,7 @@
 // sessions, progress headings, and usage reports. The supervisor talks to it over the
 // session channel (session-channel.mjs) and gets the core's own events (`core_event` frames).
 import { randomUUID } from "node:crypto";
-import { realpath } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
@@ -18,7 +18,7 @@ import { PythonKernel } from "./kernel.mjs";
 import { launchPython } from "./python-launch.mjs";
 import { PythonRecovery } from "./python-recovery.mjs";
 import { createHostHandlers } from "./host-handlers.mjs";
-import { discoverSkills, manifestForSkills, writeManifestAtomic } from "./skills.mjs";
+import { readActorSkillGrant } from "./skill-grant.mjs";
 import { assembleActorSystemPrompt, loadDepthPrompt } from "./depth-prompt.mjs";
 import { formatPrefixPrompt, loadPromptPrefix } from "./prompt-prefix.mjs";
 import { PROGRESS_ENTRY_TYPE, ProgressHeadingTracker } from "./progress-projection.mjs";
@@ -31,7 +31,7 @@ import { fastModeOptions, supportsFastMode, withCapabilities } from "./model-cap
 import { MessageClock } from "./message-time.mjs";
 import { locationBlock } from "./input-location.mjs";
 import {
-  INCOMING_MESSAGE_TYPE, KERNEL_SCRIPT, PYTHON_RUNTIME_SUPPORT, USAGE_ENTRY_TYPE, actorSkillGrant, applyActorSkillGrant,
+  INCOMING_MESSAGE_TYPE, KERNEL_SCRIPT, PYTHON_RUNTIME_SUPPORT, USAGE_ENTRY_TYPE, 
   incomingCustomPayload, nativeAsyncEnabled, pythonToolResult, skillPrompt,
 } from "./python-tool.mjs";
 const exec = promisify(execFile);
@@ -454,16 +454,14 @@ export class CoreWorker {
   // ---- Python ----
 
   async #resolveManifest() {
-    const grant = await actorSkillGrant();
+    const grant = await readActorSkillGrant();
     if (!grant) throw new Error("core sessions need the supervisor's skill grant");
-    const catalog = await discoverSkills(grant.skills.map((skill) => ({ source: "skill", path: skill.skillPath })));
-    if (catalog.diagnostics.length) throw new Error(`Invalid skill package:\n${catalog.diagnostics.map((item) => item.error).join("\n")}`);
-    const manifest = manifestForSkills(applyActorSkillGrant(catalog.skills, grant));
+    const manifest = { version: 1, generatedAt: new Date().toISOString(), skills: grant.manifestSkills };
     const base = this.options.sidecarBase;
     const capabilities = manifest.skills.filter((skill) => skill.python).map((skill) => ({
       id: skill.id, version: skill.version, contentHash: skill.contentHash, hostRequests: skill.python.hostRequests }));
-    await Promise.all([writeManifestAtomic(`${base}.skill-manifest.json`, manifest),
-      writeManifestAtomic(`${base}.capabilities.json`, { version: 1, capabilities })]);
+    await Promise.all([writeJsonAtomic(`${base}.skill-manifest.json`, manifest),
+      writeJsonAtomic(`${base}.capabilities.json`, { version: 1, capabilities })]);
     return manifest;
   }
 
@@ -710,4 +708,23 @@ export async function bootstrapCoreWorker({ argv = [], cwd = process.cwd(), env 
   try { await worker.start(); }
   catch (error) { await worker.close().catch(() => {}); throw error; }
   return worker;
+}
+
+// A session sidecar (its manifest and capabilities), written whole; unchanged content is left alone.
+async function writeJsonAtomic(filePath, value) {
+  const content = `${JSON.stringify(value, null, 2)}\n`;
+  let current;
+  try { current = await lstat(filePath); } catch (error) { if (error?.code !== "ENOENT") throw error; }
+  if (current?.isFile()) {
+    let unchanged = false;
+    try { unchanged = await readFile(filePath, "utf8") === content; } catch {}
+    if (unchanged) {
+      if ((current.mode & 0o777) !== 0o600) await chmod(filePath, 0o600);
+      return;
+    }
+  }
+  await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, content, { mode: 0o600 });
+  await rename(temporary, filePath);
 }

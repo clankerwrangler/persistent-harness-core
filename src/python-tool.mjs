@@ -1,67 +1,14 @@
-// The harness's Python tool as the session worker offers it: where the kernel lives, the
-// session's skill grant, how a cell's result becomes the tool result, the skill part of
+// The harness's Python tool as the session worker offers it: where the kernel lives, how a cell's result becomes the tool result, the skill part of
 // the prompt, and the message a family member's message becomes.
-import { createHash } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INCOMING_AGENT_MESSAGE_TYPE } from "./agent-message-projection.mjs";
-import { actorGenerationGrantIdentity } from "./session-paths.mjs";
 
 const PACKAGE_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const PYTHON_RUNTIME_SUPPORT = path.join(PACKAGE_ROOT, "python-runtime");
 export const KERNEL_SCRIPT = path.join(PYTHON_RUNTIME_SUPPORT, "kernel.py");
 export const INCOMING_MESSAGE_TYPE = INCOMING_AGENT_MESSAGE_TYPE;
 export const USAGE_ENTRY_TYPE = "persistent-harness-usage";
-
-let actorGrantPromise;
-/** The skills and capabilities the supervisor granted this worker generation. */
-export async function actorSkillGrant(env = process.env) {
-  const grantPath = env.PI_HARNESS_ACTOR_SKILL_GRANT || null;
-  if (!grantPath) return null;
-  const actorId = env.PI_HARNESS_ACTOR_ID || null;
-  const generation = env.PI_HARNESS_ACTOR_GENERATION ? Number(env.PI_HARNESS_ACTOR_GENERATION) : null;
-  actorGrantPromise ??= (async () => {
-    const identity = actorGenerationGrantIdentity(grantPath);
-    const stat = await lstat(grantPath);
-    if (!stat.isFile() || stat.size > 1024 * 1024 || (stat.mode & 0o277)) throw new Error("invalid actor generation grant file");
-    const content = await readFile(grantPath, "utf8");
-    if (identity.generation !== generation || createHash("sha256").update(content).digest("hex") !== identity.digest) {
-      throw new Error("actor generation skill grant identity mismatch");
-    }
-    const grant = JSON.parse(content);
-    if (grant.sessionId !== actorId || grant.actorGeneration !== generation) throw new Error("actor generation skill grant binding mismatch");
-    if (grant?.version !== 1 || !Array.isArray(grant.skills) || !Array.isArray(grant.capabilities)) {
-      throw new Error("invalid actor skill grant");
-    }
-    return grant;
-  })();
-  return actorGrantPromise;
-}
-
-export function applyActorSkillGrant(skills, grant) {
-  if (!grant) return skills;
-  const discovered = new Map(skills.map((skill) => [skill.id, skill]));
-  const capabilityIds = new Set(grant.capabilities.map((item) => item.id));
-  const selected = grant.skills.map((expected) => {
-    const skill = discovered.get(expected.id);
-    if (!skill) throw new Error(`granted actor skill was not discovered: ${expected.id}`);
-    if (skill.version !== expected.version || skill.contentHash !== expected.contentHash
-      || path.resolve(skill.skillPath) !== path.resolve(expected.skillPath)) {
-      throw new Error(`granted actor skill changed after admission: ${expected.id}`);
-    }
-    if (Boolean(skill.python) !== expected.pythonBacked) throw new Error(`granted actor skill backing changed: ${expected.id}`);
-    if (skill.python && !capabilityIds.has(skill.id)) throw new Error(`Python skill exceeds actor capability manifest: ${skill.id}`);
-    return skill;
-  });
-  for (const capability of grant.capabilities) {
-    const expected = grant.skills.find((skill) => skill.id === capability.id);
-    if (!expected?.pythonBacked || expected.version !== capability.version || expected.contentHash !== capability.contentHash) {
-      throw new Error(`invalid executable actor capability: ${capability.id}`);
-    }
-  }
-  return selected;
-}
 
 // files.show(): an image for the user only. It travels in the result's details, which the
 // conversation displays and the model never receives; the model gets a note in its place.

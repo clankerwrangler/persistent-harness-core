@@ -53,7 +53,7 @@ import { CoreTranscriptReader } from "./core-transcript-reader.mjs";
 import { HarnessStore } from "./store.mjs";
 import { HomeFailureNudge } from "./home-failure-nudge.mjs";
 import { PythonRuntimeManager, runtimeVersions } from "./python-runtime.mjs";
-import { discoverSkills, discoverSkillsFromDirectory, materializeSkills, skillCatalogForSkills } from "./skills.mjs";
+import { discoverSkills, discoverSkillsFromDirectory, grantedManifestSkills, materializeSkills, skillCatalogForSkills } from "./skills.mjs";
 import { defaultRootName, resolveRootTitle, firstCompletedTitleTurn } from "./root-title.mjs";
 import { createRootTitleGenerator } from "./root-title-generator.mjs";
 
@@ -2182,6 +2182,7 @@ export class HarnessSupervisor {
     let skillGrant;
     try {
       skillGrant = await this.#reconcileSkillGrant(sessionId, new Set(), check);
+      skillGrant = { ...skillGrant, manifestSkills: await grantedManifestSkills(skillGrant) };
     } catch (error) {
       check();
       const failed = this.store.getActorLaunch(sessionId);

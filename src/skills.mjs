@@ -432,3 +432,27 @@ export async function replaceDirectoryAtomic(targetPath, build) {
     throw error;
   }
 }
+
+/** The discovered skills a grant names, checked against it: nothing changed since it was granted. */
+export function selectGrantedSkills(skills, grant) {
+  const discovered = new Map(skills.map((skill) => [skill.id, skill]));
+  const capabilityIds = new Set(grant.capabilities.map((item) => item.id));
+  return grant.skills.map((expected) => {
+    const skill = discovered.get(expected.id);
+    if (!skill) throw new Error(`granted actor skill was not discovered: ${expected.id}`);
+    if (skill.version !== expected.version || skill.contentHash !== expected.contentHash
+      || path.resolve(skill.skillPath) !== path.resolve(expected.skillPath)) {
+      throw new Error(`granted actor skill changed after admission: ${expected.id}`);
+    }
+    if (Boolean(skill.python) !== expected.pythonBacked) throw new Error(`granted actor skill backing changed: ${expected.id}`);
+    if (skill.python && !capabilityIds.has(skill.id)) throw new Error(`Python skill exceeds actor capability manifest: ${skill.id}`);
+    return skill;
+  });
+}
+
+/** What a session needs to use each granted skill, for the grant file. */
+export async function grantedManifestSkills(grant) {
+  const catalog = await discoverSkills(grant.skills.map((skill) => ({ source: "skill", path: skill.skillPath })));
+  if (catalog.diagnostics.length) throw new Error(`Invalid skill package:\n${catalog.diagnostics.map((item) => item.error).join("\n")}`);
+  return manifestForSkills(selectGrantedSkills(catalog.skills, grant), { generatedAt: null }).skills;
+}
