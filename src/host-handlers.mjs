@@ -1236,11 +1236,22 @@ export function createHostHandlers({ cwd, scratch = null, getClient, getContext 
       };
     },
 
+    // The list is for choosing a child: name, address, state and when it last did anything.
+    // One child's full record comes from rlm.get_subagent.
     async "rlm.list_subagents"() {
       const client = getClient();
       if (!client?.isConnected) throw new Error("harness is offline");
       const result = await client.request("list_children", {});
-      return { children: result.children.map(projectManagedSession) };
+      return { children: result.children.map((child) => Object.fromEntries(["name", "shortId", "activity", "lifecycle", "lastActivityAt"]
+        .filter((key) => Object.hasOwn(child, key)).map((key) => [key, child[key]]))) };
+    },
+
+    async "rlm.get_subagent"(payload) {
+      const client = getClient();
+      if (!client?.isConnected) throw new Error("harness is offline");
+      const value = requireRecord(payload, "rlm.get_subagent payload");
+      const result = await client.request("get_child", { selector: requireString(value.selector, "selector", { maxBytes: 256 }) });
+      return { child: projectManagedSession(result.child) };
     },
 
     async "rlm.stop_subagent"(payload) {

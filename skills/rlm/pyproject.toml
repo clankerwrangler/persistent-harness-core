@@ -9,4 +9,4 @@ id = "rlm"
 import-name = "harness_rlm"
 alias = "rlm"
 entry-point = "spawn"
-host-requests = ["rlm.spawn", "rlm.find_models", "rlm.list_subagents", "rlm.stop_subagent", "rlm.revive_subagent", "rlm.delete_subagent"]
+host-requests = ["rlm.spawn", "rlm.find_models", "rlm.list_subagents", "rlm.get_subagent", "rlm.stop_subagent", "rlm.revive_subagent", "rlm.delete_subagent"]

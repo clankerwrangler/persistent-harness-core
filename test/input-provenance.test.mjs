@@ -94,14 +94,17 @@ test("roster, child listing, and lifecycle results omit process-control fields a
   const handlers = createHostHandlers({ cwd: "/workspace", getClient: () => ({ isConnected: true,
     request: async (type, params) => { calls.push({ type, params }); return type === "get_roster" ? { agents: [owned] }
       : type === "list_children" ? { children: [owned] } : { child: owned }; } }) });
-  for (const name of ["agent_message.list_agents", "rlm.list_subagents", "rlm.stop_subagent", "rlm.revive_subagent", "rlm.delete_subagent"]) {
+  // The child list carries only what choosing a child needs.
+  assert.deepEqual((await handlers["rlm.list_subagents"]({})).children, [{ name: "worker", shortId: "cafe", activity: "working", lifecycle: "resident" }]);
+  for (const name of ["agent_message.list_agents", "rlm.get_subagent", "rlm.stop_subagent", "rlm.revive_subagent", "rlm.delete_subagent"]) {
     const result = await handlers[name]({ selector: "cafe" });
     assert.doesNotMatch(JSON.stringify(result), /control-canary|actorIdentity|actorPid|actorGeneration|processIdentity/);
     const session = result.agents?.[0] ?? result.children?.[0] ?? result.child;
     assert.equal(session.sessionId, "child"); assert.equal(session.shortId, "cafe"); assert.equal(session.lifecycle, "resident");
     assert.deepEqual(session.launch.capabilityIds, ["files"]);
   }
-  assert.deepEqual(calls.slice(2).map((call) => call.params), [{ selector: "cafe" }, { selector: "cafe" }, { selector: "cafe" }]);
+  assert.deepEqual(calls.slice(2).map((call) => [call.type, call.params]), [["get_child", { selector: "cafe" }], ["stop_child", { selector: "cafe" }],
+    ["revive_child", { selector: "cafe" }], ["delete_child", { selector: "cafe" }]]);
 });
 
 test("public input accepts client correlation but cannot claim an internal source", () => {

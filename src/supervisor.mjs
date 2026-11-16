@@ -958,6 +958,7 @@ export class HarnessSupervisor {
     }
     if (type === "spawn_child") return this.#spawnChild(state.sessionId, params);
     if (type === "list_children") return { children: this.store.listChildren(state.sessionId) };
+    if (type === "get_child") return { child: this.store.resolveDirectChild(state.sessionId, params.selector) };
     if (type === "stop_child") { const child = this.store.resolveDirectChild(state.sessionId, params.selector); return this.#withSessionMutation(child.sessionId, async () => { await this.#stopActorAndDrainInputs(child.sessionId); return { child: this.store.getSession(child.sessionId) }; }); }
     if (type === "revive_child") { const child = this.store.resolveDirectChild(state.sessionId, params.selector); return this.#withSessionMutation(child.sessionId, async () => { this.#requestActorStart(child.sessionId, true); return { child: this.store.getSession(child.sessionId) }; }); }
     if (type === "delete_child") { const child = this.store.resolveDirectChild(state.sessionId, params.selector); const result = await this.#deleteSessionTree(child.sessionId); return { child: result.session, deletedSessionIds: result.deletedSessionIds }; }

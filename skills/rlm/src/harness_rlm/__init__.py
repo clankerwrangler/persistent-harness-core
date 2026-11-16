@@ -32,6 +32,10 @@ def list_subagents() -> SkillResult:
     return SkillResult(host_request("rlm.list_subagents", {}))
 
 
+def get_subagent(selector: str) -> SkillResult:
+    return SkillResult(host_request("rlm.get_subagent", {"selector": selector}))
+
+
 def stop_subagent(selector: str) -> SkillResult:
     result = host_request("rlm.stop_subagent", {"selector": selector})
     return SkillResult(result, {"application/vnd.persistent-harness.child-lifecycle+json": result})
