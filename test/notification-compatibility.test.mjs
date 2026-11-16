@@ -40,8 +40,12 @@ test("actual recovery baseline writable startup preserves successor notification
   const jobBefore = cron.getJob("compat-job"), runBefore = cron.getRun("compat-run"), noticeBefore = notices.get(item.id), deliveriesBefore = notices.deliveries(item.id);
   const synthetic = { inputId: "after-input", source: "cron", origin: { jobId: "compat-job", runId: "compat-run" }, message: "Successor task", acceptedAt: Date.now(), images: [] };
   assert.equal(actorInputDigest(synthetic.message, "[]", "auto"), baselineProtocol.actorInputDigest(synthetic.message, "[]", "auto"));
-  // Historical role headers and new generic headers remain canonical verifier inputs.
-  assert.deepEqual(actorInputCustomPayload(synthetic, "User"), baselineProtocol.actorInputCustomPayload(synthetic));
+  // Whatever role label the baseline wrote into its header ("User" in older releases),
+  // the current code reproduces it exactly, so recorded inputs stay verifiable.
+  const baselinePayload = baselineProtocol.actorInputCustomPayload(synthetic);
+  const baselineLabel = /not a new ([A-Za-z]+) submission/.exec(baselinePayload.content)?.[1];
+  assert(baselineLabel, "the baseline header names its role label");
+  assert.deepEqual(actorInputCustomPayload(synthetic, baselineLabel), baselinePayload);
   assert.equal(actorInputCustomPayload(synthetic, "user").details.inputId, "after-input");
   notices.close(); cron.close(); current.close();
   const recovery = new baselineStore.HarnessStore(file), recoveryCron = new baselineCron.CronStore(file);
