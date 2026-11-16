@@ -94,8 +94,16 @@ test("roster, child listing, and lifecycle results omit process-control fields a
   const handlers = createHostHandlers({ cwd: "/workspace", getClient: () => ({ isConnected: true,
     request: async (type, params) => { calls.push({ type, params }); return type === "get_roster" ? { agents: [owned] }
       : type === "list_children" ? { children: [owned] } : { child: owned }; } }) });
-  // The child list carries only what choosing a child needs.
-  assert.deepEqual((await handlers["rlm.list_subagents"]({})).children, [{ name: "worker", shortId: "cafe", activity: "working", lifecycle: "resident" }]);
+  // The child list carries only what choosing a child needs, with one state.
+  assert.deepEqual((await handlers["rlm.list_subagents"]({})).children, [{ name: "worker", shortId: "cafe", state: "working" }]);
+  const listed = async (child) => (await createHostHandlers({ cwd: "/workspace", getClient: () => ({ isConnected: true,
+    request: async () => ({ children: [{ name: "c", shortId: "c", ...child }] }) }) })["rlm.list_subagents"]({})).children[0].state;
+  assert.equal(await listed({ lifecycle: "passivated", activity: "inactive" }), "idle", "a sleeping child is idle: a message wakes it");
+  assert.equal(await listed({ lifecycle: "resident", activity: "idle" }), "idle");
+  assert.equal(await listed({ lifecycle: "resident", activity: "delegating" }), "working");
+  assert.equal(await listed({ lifecycle: "starting", activity: "idle" }), "working");
+  assert.equal(await listed({ lifecycle: "stopped", activity: "inactive" }), "stopped");
+  assert.equal(await listed({ lifecycle: "error", activity: "inactive" }), "failed");
   for (const name of ["agent_message.list_agents", "rlm.get_subagent", "rlm.stop_subagent", "rlm.revive_subagent", "rlm.delete_subagent"]) {
     const result = await handlers[name]({ selector: "cafe" });
     assert.doesNotMatch(JSON.stringify(result), /control-canary|actorIdentity|actorPid|actorGeneration|processIdentity/);

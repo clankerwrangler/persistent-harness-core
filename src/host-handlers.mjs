@@ -1236,14 +1236,16 @@ export function createHostHandlers({ cwd, scratch = null, getClient, getContext 
       };
     },
 
-    // The list is for choosing a child: name, address, state and when it last did anything.
-    // One child's full record comes from rlm.get_subagent.
+    // The list is for choosing a child: name, address, one state and when it last did anything.
+    // Idle includes sleeping children. One child's full record comes from rlm.get_subagent.
     async "rlm.list_subagents"() {
       const client = getClient();
       if (!client?.isConnected) throw new Error("harness is offline");
       const result = await client.request("list_children", {});
-      return { children: result.children.map((child) => Object.fromEntries(["name", "shortId", "activity", "lifecycle", "lastActivityAt"]
-        .filter((key) => Object.hasOwn(child, key)).map((key) => [key, child[key]]))) };
+      const state = (child) => child.lifecycle === "error" ? "failed" : child.lifecycle === "stopped" ? "stopped"
+        : child.lifecycle === "starting" || ["working", "delegating"].includes(child.activity) ? "working" : "idle";
+      return { children: result.children.map((child) => ({ name: child.name, shortId: child.shortId, state: state(child),
+        ...(child.lastActivityAt == null ? {} : { lastActivityAt: child.lastActivityAt }) })) };
     },
 
     async "rlm.get_subagent"(payload) {

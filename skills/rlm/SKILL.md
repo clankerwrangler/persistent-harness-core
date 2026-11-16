@@ -19,7 +19,7 @@ Useful operations:
 
 - `await rlm(prompt, name=None, model=None, thinking_level=None, fork_context=False)` — admit and asynchronously start a retained child. Omit `model` to use the configured child model when set, otherwise the parent model. An explicit `model=` value is a pin, not a suggestion.
 - `rlm.find_models(query="", limit=50)` — inspect the exact available provider/model catalog without credentials. It is a catalog, not a recommendation. The live parent/default and `grok-cli/grok-4.6` are listed first when present, so a Codex-heavy page or `limit=10` cannot hide the default pin.
-- `rlm.list_subagents()` — list direct retained children: name, short ID, activity, lifecycle and last activity time.
+- `rlm.list_subagents()` — list direct retained children: name, short ID, state and last activity time. State is `working`, `idle`, `stopped`, or `failed`. The `idle` state includes sleeping children.
 - `rlm.get_subagent(selector)` — one direct child's full record (model, timestamps, folders, last error, lineage).
 - `rlm.stop_subagent(selector)` — passivate one direct child while preserving it for revival.
 - `rlm.revive_subagent(selector)` — queue one stopped/passivated direct child for canonical revival.
