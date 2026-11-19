@@ -1,6 +1,7 @@
 ----------------------------- MODULE HostFileEdit -----------------------------
 \* Sources:
 \*   src/host-handlers.mjs
+\*   src/host-atomic-file.mjs
 
 EXTENDS Integers, Sequences, TLC
 CONSTANT Fault
