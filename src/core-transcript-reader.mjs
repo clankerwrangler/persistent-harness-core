@@ -81,6 +81,12 @@ export class CoreTranscriptReader {
 
   #items(entries, associations, { sanitizePresentation, publicView, allowToolImages }, entryOf = new Map()) {
     const items = [];
+    const deliveredFamilyMessageIds = new Set();
+    for (const entry of entries) {
+      if (entry.type === "custom_message" && entry.details?.messageId !== undefined) {
+        deliveredFamilyMessageIds.add(entry.details.messageId);
+      }
+    }
     for (const entry of entries) {
       // Each row remembers the entry it came from, for the scroll-back cursor.
       const push = (item) => { items.push(item); entryOf.set(item.kind === "message" ? item.message.id : item.id, entryNumber(entry)); };
@@ -104,10 +110,10 @@ export class CoreTranscriptReader {
       const other = projectProgressEntry(entry) ?? projectAgentMessageEntry(entry);
       // An incoming message's transport receipt shows only until the message itself is in.
       if (other && !(other.kind === "agent_message" && other.direction === "from" && other.delivery?.state === "accepted"
-        && entries.some((e) => e.type === "custom_message" && e.details?.messageId === other.familyMessageId))) push(other);
+        && deliveredFamilyMessageIds.has(other.familyMessageId))) push(other);
     }
-    const families = selectIncomingFamilyMessages(items.filter((item) => item.kind === "agent_message"));
-    const kept = items.filter((item) => item.kind !== "agent_message" || families.includes(item));
+    const families = new Set(selectIncomingFamilyMessages(items.filter((item) => item.kind === "agent_message")));
+    const kept = items.filter((item) => item.kind !== "agent_message" || families.has(item));
     return publicView ? sortVisibleHistory(kept) : kept;
   }
 
@@ -165,7 +171,9 @@ export class CoreTranscriptReader {
   }
 
   async readImage({ sessionFile, entryId, index, allowToolImages = false }) {
-    const entry = (await this.history(sessionFile)).find((item) => item.id === entryId);
+    const n = entryNumber({ id: entryId });
+    const entries = await this.history(sessionFile, n === undefined ? undefined : { from: n, to: n });
+    const entry = entries.find((item) => item.id === entryId);
     const content = entry?.type === "message" && entry.message?.role === "user" ? entry.message.content
       : allowToolImages && entry?.type === "message" && entry.message?.role === "toolResult" ? toolResultImages(entry.message)
       : entry?.type === "custom_message" ? entry.content : null;

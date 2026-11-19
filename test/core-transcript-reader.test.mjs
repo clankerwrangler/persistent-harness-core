@@ -3,7 +3,7 @@ import test from "node:test";
 import { CoreTranscriptReader } from "../src/core-transcript-reader.mjs";
 import { firstCompletedTitleTurn } from "../src/root-title.mjs";
 import { PROGRESS_ENTRY_TYPE } from "../src/progress-projection.mjs";
-import { AGENT_MESSAGE_ENTRY_TYPE } from "../src/agent-message-projection.mjs";
+import { AGENT_MESSAGE_ENTRY_TYPE, INCOMING_AGENT_MESSAGE_TYPE } from "../src/agent-message-projection.mjs";
 
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const at = (n) => new Date(Date.UTC(2026, 10, 9, 8, 0, n)).toISOString();
@@ -89,4 +89,33 @@ test("a scroll-back cursor must name an entry", async () => {
   for (const before of ["x", "-1", "1.5", "01"]) {
     await assert.rejects(reader.read({ sessionFile: "s", sessionId: "s", publicView: true, before }), /cursor is invalid/);
   }
+});
+
+test("readImage asks only for the referenced entry and reaches images in older chunks", async () => {
+  const fake = core([
+    user(1, [text("Old image"), { type: "image", data: PNG, mimeType: "image/png" }]),
+    reply(2, [text("Older reply.")]),
+    user(50, [text("Current chunk")]),
+  ], 50);
+  const reader = new CoreTranscriptReader({ history: fake.history });
+  const image = await reader.readImage({ sessionFile: "s", entryId: "1", index: 0 });
+  assert.equal(image.data, PNG);
+  assert.deepEqual(fake.asked, [{ from: 1, to: 1 }]);
+});
+
+test("incoming family transport receipts are suppressed once the delivered message is present", async () => {
+  const fake = core([
+    { type: "custom", customType: AGENT_MESSAGE_ENTRY_TYPE, id: "1", timestamp: at(1),
+      data: { messageId: "m-done", direction: "from", peerId: "p1", peerName: "Home", relationship: "parent", body: "delivered body" } },
+    { type: "custom_message", customType: INCOMING_AGENT_MESSAGE_TYPE, id: "2", timestamp: at(2),
+      content: "Header\ndelivered body", details: { messageId: "m-done", senderId: "p1", senderName: "Home", relationship: "parent", body: "delivered body" } },
+    { type: "custom", customType: AGENT_MESSAGE_ENTRY_TYPE, id: "3", timestamp: at(3),
+      data: { messageId: "m-pending", direction: "from", peerId: "p1", peerName: "Home", relationship: "parent", body: "pending body" } },
+  ]);
+  const page = await new CoreTranscriptReader({ history: fake.history }).read({ sessionFile: "s", sessionId: "s", publicView: true });
+  const family = page.history.filter((item) => item.kind === "agent_message");
+  assert.deepEqual(family.map((item) => [item.familyMessageId, item.delivery.state]), [
+    ["m-done", "delivered"],
+    ["m-pending", "accepted"],
+  ]);
 });

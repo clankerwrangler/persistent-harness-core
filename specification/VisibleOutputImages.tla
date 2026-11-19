@@ -8,9 +8,9 @@
 \*   bin/session-records.mjs
 EXTENDS Naturals, Sequences
 CONSTANT Bug
-\* Request-time image authorization. Each request rereads the entry from the core's
-\* current chunk (older chunks and missing entries are unavailable); saved entries never
-\* change, so "unchanged" is the referenced entry still being the one saved.
+\* Request-time image authorization. Each request rereads the referenced entry from the
+\* core's history (missing entries are unavailable); saved entries never change, so
+\* "unchanged" is the referenced entry still being the one saved.
 \* "input" also abstracts the image projection of verified internal actor inputs.
 VARIABLES source, root, active, reachable, sameOrigin, available, valid, unchanged,
           phase, response, projected, rawInput, originalInput, references, visible,
