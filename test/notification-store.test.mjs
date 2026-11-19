@@ -75,7 +75,7 @@ test("closes already finished before the close column existed are not sent", asy
   const { file, store } = await fixture(t), item = store.request("root", request, 1000);
   const claim = store.claim([endpoint], 1000)[0]; store.receipt({ id: item.id, endpointId: endpoint, leaseId: claim.leaseId, status: "accepted" }, 1001);
   store.resolveKey("root", request.key, 2000);
-  const db = new DatabaseSync(file); db.exec("ALTER TABLE notification_deliveries DROP COLUMN close_claimed_at"); db.close();
+  const db = new DatabaseSync(file); db.exec("DROP INDEX IF EXISTS notification_deliveries_unclaimed_close; ALTER TABLE notification_deliveries DROP COLUMN close_claimed_at"); db.close();
   const upgraded = new NotificationStore(file); t.after(() => upgraded.close());
   assert.deepEqual(upgraded.claimClosures([endpoint], 3000), []);
 });
@@ -89,7 +89,7 @@ for (const updatedRowsBeforeFailure of [0, 1]) test(`close migration rolls back 
     store.resolveKey("root", key, 2000);
   }
   const db = new DatabaseSync(file); t.after(() => db.close());
-  db.exec("ALTER TABLE notification_deliveries DROP COLUMN close_claimed_at");
+  db.exec("DROP INDEX IF EXISTS notification_deliveries_unclaimed_close; ALTER TABLE notification_deliveries DROP COLUMN close_claimed_at");
   const before = db.prepare("SELECT * FROM notification_deliveries ORDER BY notification_id").all();
   const version = db.prepare("PRAGMA user_version").get().user_version;
   // Fail the real second migration statement, after the ALTER and optionally
@@ -278,4 +278,65 @@ test("a dialog recorded under the old source name is renamed when the store open
   assert.equal(type(), "dialog");
   reopened.cancelDialogs(2000);
   assert.equal(db.prepare("SELECT state FROM notifications WHERE id=?").get(old.id).state, "cancelled");
+});
+
+test("polling queries use partial indexes without full-table scans and keep non-attention deliveries out of close scans", async t => {
+  const { file, store } = await fixture(t), other = "b".repeat(64);
+  const db = new DatabaseSync(file); t.after(() => db.close());
+  // Populate historical closed rows so the query planner sees realistic table sizes.
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const addFamily = db.prepare("INSERT INTO notification_families(root_id,episode_id,owner,opened_at,closed_at) VALUES(?,?,'user',100,200)");
+    const addNotice = db.prepare(`INSERT INTO notifications(id,source_key,root_id,session_id,episode_id,kind,title,body,created_at,expires_at,state,read_at,updated_at,source_json)
+      VALUES(?,?,?,?,?,'idle','Idle','Done',100,500,'superseded',200,200,'{"type":"family_idle"}')`);
+    const addDelivery = db.prepare(`INSERT INTO notification_deliveries(notification_id,endpoint_id,state,attempts,due_at,accepted_at,close_claimed_at)
+      VALUES(?,?,?,?,100,200,0)`);
+    for (let i = 0; i < 150; i++) addFamily.run(`closed-${i}`, `ep-${i}`);
+    for (let i = 0; i < 500; i++) {
+      const id = `hist-${i}`;
+      addNotice.run(id, `idle:${id}`, "root", "root", `ep-${i}`);
+      addDelivery.run(id, endpoint, "accepted", 1);
+      addDelivery.run(id, other, "suppressed", 1);
+    }
+    db.exec("COMMIT");
+  } catch (error) { db.exec("ROLLBACK"); throw error; }
+
+  // Live transitions still hold alongside the backlog: non-attention accepts do not linger for closure,
+  // while attention accepts still close once after resolution.
+  const idleNotice = store.create({ key: "live:idle", rootId: "root", sessionId: "root", kind: "idle", title: "Done",
+    body: "Idle", expiresAt: 100000, source: { type: "family_idle" } }, 1000);
+  const attention = store.request("root", { ...request, key: "live-attention" }, 1000);
+  for (const claim of store.claim([endpoint, other], 1000)) {
+    store.receipt({ id: claim.notification.id, endpointId: claim.endpointId, leaseId: claim.leaseId,
+      status: claim.endpointId === endpoint ? "accepted" : "suppressed" }, 1001);
+  }
+  assert.equal(db.prepare("SELECT close_claimed_at FROM notification_deliveries WHERE notification_id=? AND endpoint_id=?").get(idleNotice.id, endpoint).close_claimed_at, 0);
+  assert.equal(db.prepare("SELECT close_claimed_at FROM notification_deliveries WHERE notification_id=? AND endpoint_id=?").get(attention.id, endpoint).close_claimed_at, null);
+  store.resolveKey("root", "live-attention", 2000);
+  assert.deepEqual(store.claimClosures([endpoint, other], 2001).map(c => c.notification.id), [attention.id]);
+  assert.deepEqual(store.claimClosures([endpoint, other], 2002), []);
+
+  // Reopening an older DB that lacks the partial indexes recreates them cleanly.
+  db.exec("DROP INDEX notification_families_open; DROP INDEX notification_deliveries_active; DROP INDEX notification_deliveries_unclaimed_close;");
+  const reopened = new NotificationStore(file, { idleMs: 100 }); t.after(() => reopened.close());
+
+  // Inspect the query plan of every statement actually executed by the 1-second polling paths.
+  const executed = [];
+  const origPrepare = DatabaseSync.prototype.prepare;
+  t.mock.method(DatabaseSync.prototype, "prepare", function(sql) {
+    if (this !== db && /^(SELECT|UPDATE|INSERT)\b/i.test(sql.trim())) executed.push(sql);
+    return origPrepare.call(this, sql);
+  });
+  assert.deepEqual(reopened.openFamilies(), []);
+  assert.deepEqual(reopened.claim([endpoint, other], 3000), []);
+  assert.deepEqual(reopened.claimClosures([endpoint, other], 3000), []);
+  assert.ok(executed.length >= 6, "expected polling queries to be captured");
+  const inspect = new DatabaseSync(file, { readOnly: true }); t.after(() => inspect.close());
+  for (const sql of new Set(executed)) {
+    const plan = origPrepare.call(inspect, `EXPLAIN QUERY PLAN ${sql}`).all().map(row => row.detail);
+    for (const detail of plan) {
+      assert.ok(!/\bSCAN\b/.test(detail) || /\bUSING (?:COVERING )?INDEX\b/.test(detail),
+        `unexpected full-table scan in plan for:\n${sql}\nplan: ${JSON.stringify(plan)}`);
+    }
+  }
 });

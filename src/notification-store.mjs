@@ -35,6 +35,7 @@ export class NotificationStore {
         root_id TEXT PRIMARY KEY, episode_id TEXT, owner TEXT NOT NULL DEFAULT 'user',
         opened_at INTEGER, quiet_since INTEGER, closed_at INTEGER, pending_user INTEGER NOT NULL DEFAULT 0, pending_owner TEXT
       ) STRICT;
+      CREATE INDEX IF NOT EXISTS notification_families_open ON notification_families(closed_at, root_id) WHERE episode_id IS NOT NULL AND closed_at IS NULL;
       CREATE TABLE IF NOT EXISTS notification_ownership (
         seq INTEGER PRIMARY KEY AUTOINCREMENT, root_id TEXT NOT NULL, observed_at INTEGER NOT NULL,
         owner TEXT NOT NULL CHECK(owner IN ('user','cron','unknown'))
@@ -60,6 +61,8 @@ export class NotificationStore {
         attempts INTEGER NOT NULL DEFAULT 0, due_at INTEGER NOT NULL, lease_id TEXT, lease_until INTEGER,
         code TEXT, accepted_at INTEGER, PRIMARY KEY(notification_id, endpoint_id)
       ) STRICT;
+      CREATE INDEX IF NOT EXISTS notification_deliveries_active
+        ON notification_deliveries(state, endpoint_id, due_at, notification_id) WHERE state IN ('pending','inflight');
     `);
     // Dialog notifications were once recorded under pi's name for them.
     this.#db.prepare(`UPDATE notifications SET source_json=json_set(source_json,'$.type','dialog')
@@ -76,6 +79,8 @@ export class NotificationStore {
         UPDATE notification_deliveries SET close_claimed_at=0
         WHERE notification_id IN (SELECT id FROM notifications WHERE state<>'pending')`));
     }
+    this.#db.exec(`CREATE INDEX IF NOT EXISTS notification_deliveries_unclaimed_close
+      ON notification_deliveries(endpoint_id, notification_id) WHERE state='accepted' AND close_claimed_at IS NULL`);
     if (this.#db.prepare("SELECT value FROM notification_meta WHERE key='version'").get().value !== "1") {
       this.#db.close(); throw new Error("unsupported notification schema version");
     }
@@ -258,13 +263,14 @@ export class NotificationStore {
         SELECT id,?,'pending',? FROM notifications WHERE state='pending' AND read_at IS NULL AND expires_at>?`)
         .run(endpoint, now, now);
       this.#db.prepare(`UPDATE notification_deliveries SET state='expired',lease_id=NULL,lease_until=NULL
-        WHERE state IN ('pending','inflight') AND notification_id IN (SELECT id FROM notifications WHERE state<>'pending' OR read_at IS NOT NULL)` ).run();
+        WHERE state IN ('pending','inflight')
+          AND EXISTS (SELECT 1 FROM notifications n WHERE n.id=notification_deliveries.notification_id AND (n.state<>'pending' OR n.read_at IS NOT NULL))`).run();
       this.#db.prepare(`UPDATE notification_deliveries SET state='failed',code='attempts_exhausted',lease_id=NULL,lease_until=NULL
-        WHERE state='inflight' AND lease_until<=? AND attempts>=?`).run(now, NOTIFICATION_RETRY_MS.length);
+        WHERE state IN ('pending','inflight') AND state='inflight' AND lease_until<=? AND attempts>=?`).run(now, NOTIFICATION_RETRY_MS.length);
       const claims = [];
       for (const endpoint of endpoints) {
         if (claims.length >= 8) break;
-        const rows = this.#db.prepare(`SELECT * FROM notification_deliveries WHERE endpoint_id=? AND attempts<?
+        const rows = this.#db.prepare(`SELECT * FROM notification_deliveries WHERE endpoint_id=? AND state IN ('pending','inflight') AND attempts<?
           AND ((state='pending' AND due_at<=?) OR (state='inflight' AND lease_until<=?)) ORDER BY due_at,notification_id LIMIT ?`)
           .all(endpoint, NOTIFICATION_RETRY_MS.length, now, now, 8 - claims.length);
         for (const row of rows) {
@@ -303,9 +309,10 @@ export class NotificationStore {
     if (!row) return { recorded: false };
     const retry = status === "retry" && row.attempts < NOTIFICATION_RETRY_MS.length;
     const state = retry ? "pending" : status === "accepted" ? "accepted" : status === "suppressed" ? "suppressed" : "failed";
-    this.#db.prepare(`UPDATE notification_deliveries SET state=?,code=?,due_at=?,lease_id=NULL,lease_until=NULL,accepted_at=?
+    this.#db.prepare(`UPDATE notification_deliveries SET state=?,code=?,due_at=?,lease_id=NULL,lease_until=NULL,accepted_at=?,
+      close_claimed_at=CASE WHEN ?='accepted' AND EXISTS(SELECT 1 FROM notifications WHERE id=? AND kind<>'attention') THEN 0 ELSE close_claimed_at END
       WHERE notification_id=? AND endpoint_id=?`).run(state, status, now + (NOTIFICATION_RETRY_MS[row.attempts - 1] ?? 900_000),
-        status === "accepted" ? now : null, id, endpointId);
+        status === "accepted" ? now : null, status, id, id, endpointId);
     return { recorded: true, state };
   }
   deliveries(id) {
