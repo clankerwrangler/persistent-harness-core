@@ -372,3 +372,42 @@ test("inherited service marker does not hold cleanup, but a matching external wr
   await writer.finish(); await until(() => absent(scratch.directory));
   assert.equal((await controlRequest(socketPath, "get_liveness")).alive, true, "the inherited-marked service remains alive after cleanup");
 });
+
+test("dead pre-session-id legacy background jobs allow cleanup, while live or invalid-owner ones still block", async t => {
+  const f = await deletionFixture(t), root = await f.admit("Root"), held = await heldProcess(t);
+  const deadId = "bg-000000000010", liveId = "bg-000000000011", invalidId = "bg-000000000012";
+  const deadDir = path.join(f.supervisor.backgroundJobsDirectory, deadId);
+  const liveDir = path.join(f.supervisor.backgroundJobsDirectory, liveId);
+  const invalidDir = path.join(f.supervisor.backgroundJobsDirectory, invalidId);
+  await mkdir(deadDir, { recursive: true });
+  await mkdir(liveDir, { recursive: true });
+  await writeFile(path.join(deadDir, "meta.json"), JSON.stringify({
+    schema: "background.job.v1", id: deadId, kind: "launched", pid: 1, starttime: "0",
+  }));
+  await writeFile(path.join(deadDir, "exit.json"), JSON.stringify({
+    exit_code: 0, signal: null, ended_at: "2026-08-31T20:42:00.000Z",
+  }));
+  await writeFile(path.join(liveDir, "meta.json"), JSON.stringify({
+    schema: "background.job.v1", id: liveId, kind: "launched", pid: held.child.pid, starttime: held.starttime,
+  }));
+  await f.client.request("delete_session", { sessionId: root.sessionId });
+  await settleScans(f);
+  assert.equal(await absent(scratchOf(f, root)), false, "a live pre-session-id legacy job still defers cleanup");
+  await held.finish();
+  await until(() => absent(scratchOf(f, root)));
+  assert.equal(f.supervisor.store.getRootScratch(root.sessionId).state, "removed");
+
+  // Explicit invalid session_id (e.g. null) is not a pre-session-id omission and must still fail closed.
+  const second = await f.admit("Second");
+  await mkdir(invalidDir, { recursive: true });
+  await writeFile(path.join(invalidDir, "meta.json"), JSON.stringify({
+    schema: "background.job.v1", id: invalidId, kind: "launched", session_id: null, pid: 1, starttime: "0",
+  }));
+  await f.client.request("delete_session", { sessionId: second.sessionId });
+  await settleScans(f);
+  assert.equal(await absent(scratchOf(f, second)), false, "explicit null session_id must still fail closed");
+  await writeFile(path.join(invalidDir, "meta.json"), JSON.stringify({
+    schema: "background.job.v1", id: invalidId, kind: "launched", session_id: "unrelated-owner", pid: 1, starttime: "0",
+  }));
+  await until(() => absent(scratchOf(f, second)));
+});

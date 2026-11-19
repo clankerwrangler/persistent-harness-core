@@ -223,7 +223,7 @@ export class BackgroundCompletionMonitor {
     const previous = this.#retirementSample;
     if (previous && [...owners].every(id => previous.owners.has(id))) {
       previous.owners = owners;
-      for (const [id, meta] of previous.jobs) if (meta && !owners.has(meta.session_id)) previous.jobs.delete(id);
+      for (const [id, meta] of previous.jobs) if (meta && meta.session_id !== null && !owners.has(meta.session_id)) previous.jobs.delete(id);
       return;
     }
     const sample = { owners, jobs: new Map(), complete: false, directory: null };
@@ -240,7 +240,7 @@ export class BackgroundCompletionMonitor {
         if (++count > 10_000) return;
         if (!JOB_ID.test(entry.name)) continue;
         const meta = await this.#retirementJobMeta(directory, entry.name);
-        if (!meta || owners.has(meta.session_id)) sample.jobs.set(entry.name, meta);
+        if (!meta || meta.session_id === null || owners.has(meta.session_id)) sample.jobs.set(entry.name, meta);
       }
       const current = await lstat(this.#directory);
       sample.complete = current.isDirectory() && current.dev === sample.directory.dev && current.ino === sample.directory.ino;
@@ -253,9 +253,11 @@ export class BackgroundCompletionMonitor {
     try {
       job = await open(`/proc/self/fd/${directory.fd}/${id}`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
       const meta = await readJson(`/proc/self/fd/${job.fd}/meta.json`);
-      if (meta?.schema !== "background.job.v1" || meta.id !== id
-        || typeof meta.session_id !== "string" || !SESSION_ID.test(meta.session_id)) return null;
-      return { session_id: meta.session_id,
+      if (meta?.schema !== "background.job.v1" || meta.id !== id) return null;
+      // Pre-session-id legacy jobs omit session_id; verify their process identity instead of blocking forever.
+      const unowned = meta.session_id === undefined;
+      if (!unowned && (typeof meta.session_id !== "string" || !SESSION_ID.test(meta.session_id))) return null;
+      return { session_id: unowned ? null : meta.session_id,
         kind: ["launched", "adopted"].includes(meta.kind) ? meta.kind : null,
         pid: Number.isSafeInteger(meta.pid) && meta.pid > 0 && meta.pid <= 2 ** 31 - 1 ? meta.pid : null,
         starttime: typeof meta.starttime === "string" && /^[0-9]{1,20}$/.test(meta.starttime) ? meta.starttime : null };
@@ -273,13 +275,13 @@ export class BackgroundCompletionMonitor {
       const stat = await directory.stat();
       if (stat.dev !== sample.directory.dev || stat.ino !== sample.directory.ino) return false;
       for (const [id, previous] of sample.jobs) {
-        if (previous && !owners.has(previous.session_id)) continue;
+        if (previous && previous.session_id !== null && !owners.has(previous.session_id)) continue;
         const identity = completeRetirementIdentity(previous) ? previous : await this.#retirementJobMeta(directory, id);
         // Repair incomplete observations as a whole, while keeping an established owner sticky.
         if (!identity || previous && identity.session_id !== previous.session_id) return false;
-        if (!sample.owners.has(identity.session_id)) { sample.jobs.delete(id); continue; }
+        if (identity.session_id !== null && !sample.owners.has(identity.session_id)) { sample.jobs.delete(id); continue; }
         sample.jobs.set(id, identity);
-        if (!owners.has(identity.session_id)) continue;
+        if (identity.session_id !== null && !owners.has(identity.session_id)) continue;
         if (!completeRetirementIdentity(identity)) return false;
         let text;
         try { text = await readBoundedText(`/proc/${identity.pid}/stat`, 4096); }

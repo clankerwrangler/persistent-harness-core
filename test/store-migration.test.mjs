@@ -90,3 +90,29 @@ test("parent-edge index is present on fresh stores and upgrades existing stores 
     } finally { store.close(); }
   }
 });
+
+test("pending scratch index upgrades existing stores and avoids scanning deleted sessions", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "store-pending-scratch-index-"));
+  const file = path.join(root, "harness.sqlite");
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let store = new HarnessStore(file);
+  store.createRoot({ sessionId: "deleting-root", cwd: root, name: "Deleting", actorToken: "fixture", now: 1, launch: {} });
+  store.setRootScratch("deleting-root", { version: 1, state: "ready", directory: root, base: { dev: "1", ino: "1" }, root: { dev: "1", ino: "2" } });
+  store.deleteSession("deleting-root", 2);
+  store.createRoot({ sessionId: "removed-root", cwd: root, name: "Removed", actorToken: "fixture", now: 3, launch: {} });
+  store.setRootScratch("removed-root", { version: 1, state: "removed", directory: root, base: { dev: "1", ino: "1" }, root: { dev: "1", ino: "3" } });
+  store.deleteSession("removed-root", 4);
+  store.createRoot({ sessionId: "invalid-json-root", cwd: root, name: "Invalid", actorToken: "fixture", now: 5, launch: {} });
+  store.deleteSession("invalid-json-root", 6);
+  store.close();
+
+  const db = new DatabaseSync(file); t.after(() => db.close());
+  db.exec("UPDATE sessions SET scratch_json = 'not-json' WHERE id = 'invalid-json-root'; DROP INDEX sessions_pending_scratch;");
+  store = new HarnessStore(file);
+  t.after(() => store.close());
+  assert.deepEqual(store.listPendingScratchRoots(), ["deleting-root"]);
+  const inspect = new DatabaseSync(file, { readOnly: true }); t.after(() => inspect.close());
+  const plan = inspect.prepare(`EXPLAIN QUERY PLAN SELECT id FROM sessions WHERE kind = 'root' AND lifecycle = 'deleted'
+    AND CASE WHEN json_valid(scratch_json) THEN json_extract(scratch_json, '$.state') END = 'deleting'`).all();
+  assert(plan.some(row => /SEARCH sessions USING .*INDEX sessions_pending_scratch/.test(row.detail)), JSON.stringify(plan));
+});

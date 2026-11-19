@@ -234,6 +234,7 @@ const CURRENT_SCHEMA = `
   CREATE INDEX sessions_family ON sessions(family_id, kind, created_at);
   CREATE INDEX sessions_parent ON sessions(parent_session_id, lifecycle, id);
   CREATE INDEX sessions_lifecycle ON sessions(lifecycle, quiet_since, created_at, id);
+  CREATE INDEX sessions_pending_scratch ON sessions(lifecycle, id) WHERE kind = 'root' AND lifecycle = 'deleted' AND CASE WHEN json_valid(scratch_json) THEN json_extract(scratch_json, '$.state') END = 'deleting';
   CREATE TABLE children (
     session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE
   ) STRICT;
@@ -393,6 +394,11 @@ export class HarnessStore {
     if (!sessionColumns.has("scratch_json")) this.#db.exec("ALTER TABLE sessions ADD COLUMN scratch_json TEXT");
     // Full parent edges serve active counts and deletion through tombstones.
     this.#db.exec("CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_session_id, lifecycle, id)");
+    if (sessionColumns.has("kind") && sessionColumns.has("lifecycle")) {
+      this.#db.exec(`CREATE INDEX IF NOT EXISTS sessions_pending_scratch ON sessions(lifecycle, id)
+        WHERE kind = 'root' AND lifecycle = 'deleted'
+          AND CASE WHEN json_valid(scratch_json) THEN json_extract(scratch_json, '$.state') END = 'deleting'`);
+    }
     let inputColumns = new Set(this.#db.prepare("PRAGMA table_info(actor_inputs)").all().map((row) => row.name));
     if (!inputColumns.has("wake_error_generation")) this.#db.exec("ALTER TABLE actor_inputs ADD COLUMN wake_error_generation INTEGER");
     if (!inputColumns.has("location_json")) this.#db.exec("ALTER TABLE actor_inputs ADD COLUMN location_json TEXT");
