@@ -215,7 +215,7 @@ export class SessionHistoryIndex {
       const version = Number(db.prepare("PRAGMA user_version").get().user_version);
       // Older indexes read pi transcripts: derived data, rebuilt from the core.
       if (version !== 0 && version !== SESSION_HISTORY_SCHEMA_VERSION) throw new Error("derived session history schema version is unsupported");
-      db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
+      db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA cache_size = -8192;");
       if (this.databasePath !== ":memory:") db.exec("PRAGMA journal_mode = WAL;");
       db.exec(`
         CREATE TABLE IF NOT EXISTS sources (
@@ -322,11 +322,21 @@ export class SessionHistoryIndex {
         continue;
       }
       signal?.throwIfAborted();
+      this.#assertOpen();
       if (source && !restart && added.last === null) {
         this.#db.prepare("UPDATE sources SET indexed_at = ? WHERE session_id = ?").run(Date.now(), session.sessionId);
         unchanged.push(session.sessionId);
         continue;
       }
+      // Hash outside the SQLite write transaction so yielding to I/O never holds a write lock.
+      const prepared = [];
+      let count = 0;
+      for (const message of added.messages) {
+        if (count++ % 128 === 0) { await yieldToIO(); signal?.throwIfAborted(); }
+        prepared.push({ message, hash: textHash(message.text) });
+      }
+      signal?.throwIfAborted();
+      this.#assertOpen();
       this.#db.exec("BEGIN IMMEDIATE");
       try {
         if (restart) { this.#deleteSession(session.sessionId); source = undefined; }
@@ -337,13 +347,10 @@ export class SessionHistoryIndex {
         const insertDocument = this.#db.prepare(`INSERT OR IGNORE INTO documents(session_id, entry_id, entry_n, role, created_at, text_hash)
           VALUES (?, ?, ?, ?, ?, ?)`);
         const insertFts = this.#db.prepare("INSERT INTO message_fts(rowid, text) VALUES (?, ?)");
-        let count = 0;
-        for (const message of added.messages) {
-          if (count++ % 128 === 0) { await yieldToIO(); signal?.throwIfAborted(); }
-          const row = insertDocument.run(session.sessionId, message.id, message.n, message.role, message.createdAt, textHash(message.text));
+        for (const { message, hash } of prepared) {
+          const row = insertDocument.run(session.sessionId, message.id, message.n, message.role, message.createdAt, hash);
           if (row.changes) insertFts.run(Number(row.lastInsertRowid), message.text);
         }
-        signal?.throwIfAborted();
         this.#db.exec("COMMIT");
       } catch (error) { this.#db.exec("ROLLBACK"); throw error; }
       this.#stale.delete(session.sessionId);
@@ -389,8 +396,9 @@ export class SessionHistoryIndex {
   #coverage(sessions, db, unavailable = new Set()) {
     let indexed = 0, changed = 0, missing = 0, oldest = null, newest = null;
     const pending = new Set(unavailable);
+    const getSource = db.prepare("SELECT * FROM sources WHERE session_id = ?");
     for (const session of sessions) {
-      const source = db.prepare("SELECT * FROM sources WHERE session_id = ?").get(session.sessionId);
+      const source = getSource.get(session.sessionId);
       if (!source || source.session_file !== session.sessionFile
         || Number(source.sanitize_presentation) !== Number(session.sanitizePresentation)) { missing++; pending.add(session.sessionId); continue; }
       indexed++;

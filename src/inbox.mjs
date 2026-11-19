@@ -20,10 +20,14 @@ function requireName(value, label) {
 
 export class InboxStore {
   #db;
-  constructor(databasePath) {
-    this.#db = new DatabaseSync(databasePath);
-    this.#db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
-    if (databasePath !== ":memory:") this.#db.exec("PRAGMA journal_mode = WAL;");
+  #ownsDb;
+  constructor(databasePath, { db = null } = {}) {
+    this.#ownsDb = !db;
+    this.#db = db ?? new DatabaseSync(databasePath);
+    if (this.#ownsDb) {
+      this.#db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+      if (databasePath !== ":memory:") this.#db.exec("PRAGMA journal_mode = WAL;");
+    }
     this.#db.exec(`BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS inbox_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
       INSERT OR IGNORE INTO inbox_meta VALUES ('schema_version', '1');
@@ -105,7 +109,7 @@ export class InboxStore {
     this.#db.prepare("DELETE FROM inbox_messages WHERE received_at < ?").run(now - MESSAGE_RETENTION_MS);
   }
 
-  close() { this.#db.close(); }
+  close() { if (this.#ownsDb) this.#db.close(); }
 }
 
 function reply(res, status, body) {

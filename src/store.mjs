@@ -343,12 +343,14 @@ export class HarnessStore {
 
   constructor(databasePath, { readOnly = false } = {}) {
     this.#db = new DatabaseSync(databasePath, { readOnly });
-    this.#db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+    this.#db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA cache_size = -16384;");
     // Native read-only connections can still create local WAL coordination sidecars.
     if (readOnly) return;
     if (databasePath !== ":memory:") this.#db.exec("PRAGMA journal_mode = WAL;");
     this.#migrate();
   }
+
+  get database() { return this.#db; }
 
   #terminalizeSessionWork(sessionId, now = Date.now()) {
     this.#db.prepare(`UPDATE messages SET state = 'rejected', last_error = ?, delivered_at = coalesce(delivered_at, ?)

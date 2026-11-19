@@ -5,6 +5,9 @@ import path from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { HarnessStore } from "../src/store.mjs";
+import { CronStore } from "../src/cron-store.mjs";
+import { NotificationStore } from "../src/notification-store.mjs";
+import { InboxStore } from "../src/inbox.mjs";
 
 test("schema-1 storage migrates image receipts and sender transcript linkage in place", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "harness-image-migration-")); t.after(() => rm(root, { recursive: true, force: true }));
@@ -115,4 +118,25 @@ test("pending scratch index upgrades existing stores and avoids scanning deleted
   const plan = inspect.prepare(`EXPLAIN QUERY PLAN SELECT id FROM sessions WHERE kind = 'root' AND lifecycle = 'deleted'
     AND CASE WHEN json_valid(scratch_json) THEN json_extract(scratch_json, '$.state') END = 'deleting'`).all();
   assert(plan.some(row => /SEARCH sessions USING .*INDEX sessions_pending_scratch/.test(row.detail)), JSON.stringify(plan));
+});
+
+test("CronStore, NotificationStore, and InboxStore can share HarnessStore's SQLite connection", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "store-shared-db-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const databasePath = path.join(root, "harness.sqlite");
+  const store = new HarnessStore(databasePath);
+  t.after(() => store.close());
+  assert.equal(Number(store.database.prepare("PRAGMA cache_size").get().cache_size), -16384);
+  const cron = new CronStore(databasePath, { db: store.database });
+  const notifications = new NotificationStore(databasePath, { db: store.database });
+  const inbox = new InboxStore(databasePath, { db: store.database });
+  inbox.setRoute("alerts", { workingRoots: true });
+  assert.deepEqual(inbox.getRoute("alerts"), { workingRoots: true });
+  assert.deepEqual(cron.listJobs(), []);
+  assert.deepEqual(notifications.openFamilies(), []);
+  // Closing stores that borrowed the connection must not close HarnessStore.
+  inbox.close();
+  notifications.close();
+  cron.close();
+  assert.equal(store.schemaVersion, 2);
 });

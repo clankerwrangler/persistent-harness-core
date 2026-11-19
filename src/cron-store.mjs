@@ -98,11 +98,15 @@ const CRON_SCHEMA = `
 
 export class CronStore {
   #db;
+  #ownsDb;
 
-  constructor(databasePath) {
-    this.#db = new DatabaseSync(databasePath);
-    this.#db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
-    if (databasePath !== ":memory:") this.#db.exec("PRAGMA journal_mode = WAL;");
+  constructor(databasePath, { db = null } = {}) {
+    this.#ownsDb = !db;
+    this.#db = db ?? new DatabaseSync(databasePath);
+    if (this.#ownsDb) {
+      this.#db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+      if (databasePath !== ":memory:") this.#db.exec("PRAGMA journal_mode = WAL;");
+    }
     this.#db.exec(`BEGIN IMMEDIATE; ${CRON_SCHEMA} COMMIT;`);
     const version = this.#db.prepare("SELECT value FROM cron_meta WHERE key = 'schema_version'").get()?.value;
     if (version !== "1") throw new Error(`unsupported cron schema version: ${String(version)}`);
@@ -423,5 +427,5 @@ export class CronStore {
     return { jobs, runs };
   }
 
-  close() { this.#db.close(); }
+  close() { if (this.#ownsDb) this.#db.close(); }
 }

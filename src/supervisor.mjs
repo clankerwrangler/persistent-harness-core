@@ -471,7 +471,7 @@ export class HarnessSupervisor {
     cronTickIntervalMs = Number(process.env.PI_HARNESS_CRON_TICK_MS ?? 60_000),
     cronMaxParallel = Number(process.env.PI_HARNESS_CRON_MAX_PARALLEL ?? 2),
     cronDefaultTimezone = process.env.PI_HARNESS_CRON_TIMEZONE || DEFAULT_CRON_TIMEZONE,
-    cronStoreFactory = (value) => new CronStore(value),
+    cronStoreFactory = (value, options) => new CronStore(value, options),
     cronSchedulerFactory = (options) => new CronScheduler(options),
     inboxPort = process.env.PI_HARNESS_INBOX_PORT ? Number(process.env.PI_HARNESS_INBOX_PORT) : null,
     homeSessionPath = null,
@@ -551,8 +551,8 @@ export class HarnessSupervisor {
     this.#homeSessionPath = this.homeSessionPath ?? path.join(path.dirname(this.databasePath), "home.json");
     this.#store.rootFailureObserver = () => this.#homeSessionId();
     try {
-      this.#cronStore = this.cronStoreFactory(this.databasePath);
-      this.#notifications = new NotificationStore(this.databasePath, { idleMs: this.notificationIdleMs });
+      this.#cronStore = this.cronStoreFactory(this.databasePath, { db: this.#store.database });
+      this.#notifications = new NotificationStore(this.databasePath, { idleMs: this.notificationIdleMs, db: this.#store.database });
       this.#notifications.notifiesRoot = rootId => { const home = this.#homeSessionId(); return !home || rootId === home; };
       this.#notifications.cancelDialogs();
       if (!this.sessionHistoryIndex) {
@@ -585,7 +585,7 @@ export class HarnessSupervisor {
       this.#cronScheduler.start();
       if (this.inboxPort != null) {
         if (!Number.isInteger(this.inboxPort) || this.inboxPort < 0 || this.inboxPort > 65535) throw new Error("PI_HARNESS_INBOX_PORT must be a TCP port");
-        this.#inboxStore = new InboxStore(this.databasePath);
+        this.#inboxStore = new InboxStore(this.databasePath, { db: this.#store.database });
         this.#inboxServer = createInboxServer({ store: this.#inboxStore, deliver: (message) => this.#deliverInboxMessage(message), logger: this.logger });
         await new Promise((resolve, reject) => { this.#inboxServer.once("error", reject);
           this.#inboxServer.listen(this.inboxPort, this.inboxHost, () => { this.#inboxServer.off("error", reject); resolve(); }); });

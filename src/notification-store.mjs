@@ -20,13 +20,18 @@ function map(row) {
 // user_version: baseline writable readers can preserve and ignore these tables.
 export class NotificationStore {
   #db;
-  constructor(databasePath, { idleMs = NOTIFICATION_IDLE_MS } = {}) {
+  #ownsDb;
+  constructor(databasePath, { idleMs = NOTIFICATION_IDLE_MS, db = null } = {}) {
     this.idleMs = idleMs;
-    this.#db = new DatabaseSync(databasePath);
-    this.#db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
+    this.#ownsDb = !db;
+    this.#db = db ?? new DatabaseSync(databasePath);
+    if (this.#ownsDb) {
+      this.#db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
+      if (databasePath !== ":memory:") this.#db.exec("PRAGMA journal_mode = WAL;");
+    }
     const existingMeta = this.#db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='notification_meta'").get();
     if (existingMeta && this.#db.prepare("SELECT value FROM notification_meta WHERE key='version'").get()?.value !== "1") {
-      this.#db.close(); throw new Error("unsupported notification schema version");
+      if (this.#ownsDb) this.#db.close(); throw new Error("unsupported notification schema version");
     }
     this.#db.exec(`
       CREATE TABLE IF NOT EXISTS notification_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
@@ -82,10 +87,10 @@ export class NotificationStore {
     this.#db.exec(`CREATE INDEX IF NOT EXISTS notification_deliveries_unclaimed_close
       ON notification_deliveries(endpoint_id, notification_id) WHERE state='accepted' AND close_claimed_at IS NULL`);
     if (this.#db.prepare("SELECT value FROM notification_meta WHERE key='version'").get().value !== "1") {
-      this.#db.close(); throw new Error("unsupported notification schema version");
+      if (this.#ownsDb) this.#db.close(); throw new Error("unsupported notification schema version");
     }
   }
-  close() { this.#db.close(); }
+  close() { if (this.#ownsDb) this.#db.close(); }
   #transaction(action) {
     this.#db.exec("BEGIN IMMEDIATE");
     try { const result = action(); this.#db.exec("COMMIT"); return result; }

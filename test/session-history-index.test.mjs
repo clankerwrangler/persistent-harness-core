@@ -164,3 +164,46 @@ test("a damaged index file is rebuilt, and its files stay private", async (t) =>
   assert.equal((await index.search({ sessions: [source("a")], query: "recoverable" })).matches.length, 1);
   assert.equal((await stat(databasePath)).mode & 0o077, 0);
 });
+
+test("refresh yields while hashing without holding a SQLite write lock", async (t) => {
+  const fake = core();
+  fake.sessions.set("/sessions/big", Array.from({ length: 300 }, (_, i) => say(i + 1, i % 2 ? "assistant" : "user", `batchword item ${i + 1}`)));
+  const { databasePath, open } = await fixture(t, fake.history);
+  const index = open();
+  // Concurrent writer on a second connection with zero busy timeout would fail with SQLITE_BUSY
+  // if refresh() yielded to I/O while holding BEGIN IMMEDIATE.
+  const probe = new DatabaseSync(databasePath);
+  t.after(() => probe.close());
+  probe.exec("PRAGMA busy_timeout = 0;");
+  let probeWrites = 0;
+  let running = true;
+  const writer = (async () => {
+    while (running) {
+      await new Promise((resolve) => setImmediate(resolve));
+      probe.exec("BEGIN IMMEDIATE; COMMIT;");
+      probeWrites += 1;
+    }
+  })();
+  try {
+    const result = await index.refresh([source("big")]);
+    assert.deepEqual(result.indexed, ["big"]);
+  } finally {
+    running = false;
+    await writer;
+  }
+  assert(probeWrites > 0, "probe exercised writes while refresh yielded");
+  assert.equal((await index.search({ sessions: [source("big")], query: "batchword", limit: 20 })).matches.length, 20);
+});
+
+test("aborting refresh during hashing leaves previously indexed data intact", async (t) => {
+  const fake = core();
+  fake.sessions.set("/sessions/a", [say(1, "user", "keepme")]);
+  const index = (await fixture(t, fake.history)).open();
+  await index.refresh([source("a")]);
+  fake.sessions.get("/sessions/a").push(...Array.from({ length: 300 }, (_, i) => say(i + 2, "user", `abortedword ${i}`)));
+  const controller = new AbortController();
+  setImmediate(() => controller.abort(new Error("cancelled")));
+  await assert.rejects(index.refresh([source("a")], { signal: controller.signal }), /cancelled/);
+  assert.equal((await index.search({ sessions: [source("a")], query: "keepme" })).matches.length, 1);
+  assert.equal((await index.search({ sessions: [source("a")], query: "abortedword" })).matches.length, 0);
+});
