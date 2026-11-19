@@ -1,6 +1,7 @@
 --------------------- MODULE HistoryMaintenance ---------------------
 \* Sources:
 \*   src/supervisor.mjs
+\*   src/supervisor-history.mjs
 \*   src/session-history-index.mjs
 \*   src/session-records.mjs
 \*   src/core-transcript-reader.mjs

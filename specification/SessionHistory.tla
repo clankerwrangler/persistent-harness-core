@@ -2,6 +2,7 @@
 \* Sources:
 \*   src/session-history-index.mjs
 \*   src/supervisor.mjs
+\*   src/supervisor-history.mjs
 \*   src/session-records.mjs
 \*   src/core-transcript-reader.mjs
 EXTENDS Naturals, FiniteSets

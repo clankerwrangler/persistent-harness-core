@@ -4,6 +4,7 @@
 \*   src/skills.mjs
 \*   src/session-paths.mjs
 \*   src/supervisor.mjs
+\*   src/supervisor-skills.mjs
 \*   src/core-worker.mjs
 \*   src/skill-grant.mjs
 EXTENDS Naturals, FiniteSets
