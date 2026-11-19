@@ -22,7 +22,7 @@ import { CronStore } from "./cron-store.mjs";
 import { InboxStore, createInboxServer } from "./inbox.mjs";
 import { inboxOriginJobId, normalizeProgressHeading } from "./protocol.mjs";
 import { NotificationStore, NOTIFICATION_IDLE_MS } from "./notification-store.mjs";
-import { JsonLineDecoder } from "./framing.mjs";
+import { JsonLineDecoder, encodeFrame } from "./framing.mjs";
 import { projectAvailableModels, resolveModelSelection, validateInferenceEffort } from "./inference-options.mjs";
 import { actorInputDigest, actorInputPrompt,
   MAX_FRAME_BYTES,
@@ -83,7 +83,7 @@ import {
   writeSocketFrame,
 } from "./supervisor-transport.mjs";
 import { SessionHistoryCoordinator } from "./supervisor-history.mjs";
-import { SkillRuntimeCoordinator } from "./supervisor-skills.mjs";
+import { SkillRuntimeCoordinator, sameSkillCatalog } from "./supervisor-skills.mjs";
 export { socketOutputBufferLimit, supervisorInternals };
 
 const MAX_IN_FLIGHT_REQUESTS = 8192;
