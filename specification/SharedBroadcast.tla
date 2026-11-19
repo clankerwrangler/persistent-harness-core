@@ -1,6 +1,7 @@
 ----------------------- MODULE SharedBroadcast -----------------------
 \* Sources:
 \*   src/supervisor.mjs
+\*   src/supervisor-transport.mjs
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANT Fault
 Clients == {1, 2}

@@ -4,7 +4,7 @@ import { DEFAULT_SCRATCH_DIRECTORY, ensureSessionScratch, reclaimSessionScratch 
 import { nodeMemoryDiagnostics, workerMemoryDiagnostics } from "./memory-diagnostics.mjs";
 import { birthOrder, sortVisibleHistory } from "./conversation-birth.mjs";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, link, lstat, mkdir, readFile, readlink, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -22,7 +22,7 @@ import { CronStore } from "./cron-store.mjs";
 import { InboxStore, createInboxServer } from "./inbox.mjs";
 import { inboxOriginJobId, normalizeProgressHeading } from "./protocol.mjs";
 import { NotificationStore, NOTIFICATION_IDLE_MS } from "./notification-store.mjs";
-import { JsonLineDecoder, encodeFrame } from "./framing.mjs";
+import { JsonLineDecoder } from "./framing.mjs";
 import { projectAvailableModels, resolveModelSelection, validateInferenceEffort } from "./inference-options.mjs";
 import { actorInputDigest, actorInputPrompt,
   MAX_FRAME_BYTES,
@@ -57,25 +57,39 @@ const CORE_ACTOR_WORKER = path.join(PACKAGE_ROOT, "bin", "core-actor.mjs");
 // A busy actor otherwise grows its young generation to 64 MB, mostly empty; 4 MB semispaces measured smaller and no slower.
 const ACTOR_NODE_FLAGS = ["--expose-gc", "--max-semi-space-size=4"];
 const DEFAULT_SKILLS_PATH = path.resolve(path.join(PACKAGE_ROOT, "skills"));
-const SOCKET_OUTPUT_HEADROOM_BYTES = 256 * 1024;
+import {
+  acquireInstanceLock,
+  ownedSocketPath,
+  preparePidPath,
+  prepareSocketPath,
+  publishSocketLink,
+  releaseInstanceLock,
+  supervisorInternals,
+  unlinkIfOwned,
+  unlinkSocketLinkIfOwned,
+  writeJsonAtomic,
+  writeOwnedPidFile,
+} from "./supervisor-instance.mjs";
+import {
+  boundedActorEvent,
+  boundedEntries,
+  boundedReplay,
+  broadcastFrame,
+  encodeSupervisorFrame,
+  flushSocketWrites,
+  receiverRelationship,
+  requestFailure,
+  socketOutputBufferLimit,
+  writeSocketFrame,
+} from "./supervisor-transport.mjs";
+export { socketOutputBufferLimit, supervisorInternals };
+
 const MAX_IN_FLIGHT_REQUESTS = 8192;
 const COMPLETED_REQUEST_ID_CACHE_SIZE = 4096;
 const ACTOR_CONNECTION_GRACE_MS = 250;
 const ACTOR_CONNECTION_RESTART_WAIT_MS = 2000;
 const ACTOR_CONNECTION_STATE_TIMEOUT_MS = 1000;
 
-export function socketOutputBufferLimit(maxFrameBytes = MAX_FRAME_BYTES) {
-  // Reserve one full legal frame, including its newline, plus bounded small-frame traffic.
-  return maxFrameBytes + 1 + SOCKET_OUTPUT_HEADROOM_BYTES;
-}
-
-function requestFailure(code, message) { const error = new Error(message); error.code = code; return error; }
-
-function receiverRelationship(relationship) {
-  if (relationship === "parent") return "child";
-  if (relationship === "child") return "parent";
-  return relationship;
-}
 
 function sameSkillCatalog(left = [], right = []) {
   return left.length === right.length && left.every((skill, index) => {
@@ -96,294 +110,6 @@ function executableCapabilities(skills) {
   }));
 }
 
-async function writeJsonAtomic(filePath, value) {
-  await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  await rename(temporary, filePath);
-}
-
-function fileIdentity(stat, content) {
-  return {
-    dev: stat.dev,
-    ino: stat.ino,
-    ctimeMs: stat.ctimeMs,
-    birthtimeMs: stat.birthtimeMs,
-    content,
-  };
-}
-
-function sameIdentity(stat, identity) {
-  return stat.dev === identity.dev
-    && stat.ino === identity.ino
-    && stat.ctimeMs === identity.ctimeMs
-    && stat.birthtimeMs === identity.birthtimeMs;
-}
-
-async function unlinkIfOwned(filePath, identity) {
-  if (!identity) return false;
-  try {
-    const current = await lstat(filePath);
-    if (!sameIdentity(current, identity)) return false;
-    if (identity.content !== undefined && await readFile(filePath, "utf8") !== identity.content) return false;
-    await unlink(filePath);
-    return true;
-  } catch (error) {
-    if (error?.code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === "EPERM";
-  }
-}
-
-async function probeSocket(socketPath, timeoutMs = 250) {
-  return new Promise((resolve, reject) => {
-    const socket = net.createConnection(socketPath);
-    const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new Error(`timed out probing existing socket ${socketPath}`));
-    }, timeoutMs);
-    socket.once("connect", () => {
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once("error", (error) => {
-      clearTimeout(timer);
-      if (["ENOENT", "ECONNREFUSED", "ENOTSOCK"].includes(error.code)) resolve(false);
-      else reject(error);
-    });
-  });
-}
-
-async function unlinkSocketLinkIfOwned(socketPath, ownedTarget) {
-  try {
-    const currentTarget = await readlink(socketPath);
-    if (currentTarget !== ownedTarget) return false;
-    await unlink(socketPath);
-    return true;
-  } catch (error) {
-    if (["ENOENT", "EINVAL"].includes(error?.code)) return false;
-    throw error;
-  }
-}
-
-function ownedSocketPath(socketPath, ownerToken) {
-  const compactToken = ownerToken.replaceAll("-", "").slice(0, 16);
-  return path.join(path.dirname(socketPath), `.persistent-harness-${compactToken}.sock`);
-}
-
-const SUPERVISOR_PID_STARTED_AT_SLOP_MS = 120_000;
-const PROC_CLK_TCK = 100;
-
-async function readProcCmdline(pid) {
-  try {
-    return (await readFile(`/proc/${pid}/cmdline`)).toString("utf8").replaceAll("\0", " ").trim();
-  } catch (error) {
-    if (["ENOENT", "ESRCH", "EACCES", "EPERM"].includes(error?.code)) return null;
-    throw error;
-  }
-}
-
-function cmdlineLooksLikeHarnessSupervisor(cmdline) {
-  if (typeof cmdline !== "string" || !cmdline) return false;
-  return cmdline.split(/\s+/).some((arg) => {
-    const base = path.basename(arg);
-    return base === "harness-supervisor" || base === "harness-supervisor.mjs";
-  });
-}
-
-async function estimateProcessStartWallClockMs(pid) {
-  try {
-    const [uptimeContent, stat] = await Promise.all([
-      readFile("/proc/uptime", "utf8"),
-      readFile(`/proc/${pid}/stat`, "utf8"),
-    ]);
-    const close = stat.lastIndexOf(")");
-    if (close < 0) return null;
-    const startTicks = Number(stat.slice(close + 2).trim().split(/\s+/)[19]);
-    const uptimeSeconds = Number.parseFloat(uptimeContent);
-    if (!Number.isFinite(startTicks) || !Number.isFinite(uptimeSeconds)) return null;
-    return Date.now() - (uptimeSeconds - startTicks / PROC_CLK_TCK) * 1000;
-  } catch (error) {
-    if (["ENOENT", "ESRCH", "EACCES", "EPERM"].includes(error?.code)) return null;
-    throw error;
-  }
-}
-
-function recordHasOwnerToken(record) {
-  return typeof record?.ownerToken === "string" && record.ownerToken.length > 0;
-}
-
-async function processMatchesSupervisorPidRecord(record, pid = record?.pid) {
-  if (!recordHasOwnerToken(record) || !Number.isInteger(pid) || pid <= 0) return false;
-  if (cmdlineLooksLikeHarnessSupervisor(await readProcCmdline(pid))) return true;
-  if (!Number.isFinite(record.startedAt)) return false;
-  const started = await estimateProcessStartWallClockMs(pid);
-  return started != null && Math.abs(started - record.startedAt) <= SUPERVISOR_PID_STARTED_AT_SLOP_MS;
-}
-
-async function socketIsListening(socketPath) {
-  try {
-    return await probeSocket(socketPath);
-  } catch {
-    return false;
-  }
-}
-
-async function ownedSupervisorSocketIsListening(record) {
-  if (typeof record?.socketPath !== "string" || !record.socketPath) return false;
-  if (recordHasOwnerToken(record) && await socketIsListening(ownedSocketPath(record.socketPath, record.ownerToken))) return true;
-  return await socketIsListening(record.socketPath);
-}
-
-async function pidRecordIsLiveSupervisor(record, { currentPid = process.pid } = {}) {
-  const pid = record?.pid;
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  if (pid === currentPid) return false;
-  if (!processIsAlive(pid)) return false;
-  if (!await processMatchesSupervisorPidRecord(record, pid)) return false;
-  return await ownedSupervisorSocketIsListening(record);
-}
-
-async function prepareSocketPath(socketPath) {
-  let socketStat;
-  try {
-    socketStat = await lstat(socketPath);
-  } catch (error) {
-    if (error?.code === "ENOENT") return;
-    throw error;
-  }
-  if (await probeSocket(socketPath)) throw new Error(`a harness supervisor is already listening at ${socketPath}`);
-  if (socketStat.isSymbolicLink()) {
-    const target = await readlink(socketPath);
-    await unlinkSocketLinkIfOwned(socketPath, target);
-    const resolvedTarget = path.resolve(path.dirname(socketPath), target);
-    const isOwnedEndpoint = path.dirname(resolvedTarget) === path.dirname(socketPath)
-      && /^\.persistent-harness-[a-f0-9]{16}\.sock$/.test(path.basename(resolvedTarget));
-    if (isOwnedEndpoint) {
-      try {
-        await unlink(resolvedTarget);
-      } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
-      }
-    }
-    return;
-  }
-  await unlinkIfOwned(socketPath, fileIdentity(socketStat));
-}
-
-async function publishSocketLink(socketPath, ownedSocketPath, ownerToken) {
-  const target = path.basename(ownedSocketPath);
-  const temporary = `${socketPath}.${ownerToken}.link.tmp`;
-  await symlink(target, temporary);
-  await rename(temporary, socketPath);
-  return target;
-}
-
-async function preparePidPath(pidPath) {
-  let stat;
-  try {
-    stat = await lstat(pidPath);
-  } catch (error) {
-    if (error?.code === "ENOENT") return;
-    throw error;
-  }
-
-  let record;
-  let content;
-  try {
-    content = await readFile(pidPath, "utf8");
-    record = JSON.parse(content);
-  } catch {
-    await unlinkIfOwned(pidPath, fileIdentity(stat, content));
-    return;
-  }
-  if (await pidRecordIsLiveSupervisor(record)) {
-    throw new Error(`harness PID file points to live process ${record.pid}`);
-  }
-  await unlinkIfOwned(pidPath, fileIdentity(stat, content));
-}
-
-async function writeOwnedPidFile(pidPath, record) {
-  const temporaryPath = `${pidPath}.${record.ownerToken}.tmp`;
-  const content = `${JSON.stringify(record)}\n`;
-  await writeFile(temporaryPath, content, { mode: 0o600, flag: "wx" });
-  await rename(temporaryPath, pidPath);
-  await chmod(pidPath, 0o600);
-  return fileIdentity(await lstat(pidPath), content);
-}
-
-// One supervisor per PID path, claimed before the database is opened. The PID
-// file is published only once the socket listens, so on its own it leaves a
-// startup window in which a second `start` would open the same database.
-const heldInstanceLocks = new Map();
-
-async function instanceLockOwnerIsLive(lockPath, record) {
-  if (record?.pid === process.pid) return heldInstanceLocks.has(lockPath);
-  return processIsAlive(record?.pid) && await processMatchesSupervisorPidRecord(record);
-}
-
-async function acquireInstanceLock(lockPath, ownerToken) {
-  const content = `${JSON.stringify({ pid: process.pid, ownerToken, startedAt: Date.now() })}\n`;
-  const temporaryPath = `${lockPath}.${ownerToken}.tmp`;
-  await writeFile(temporaryPath, content, { mode: 0o600, flag: "wx" });
-  try {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      try {
-        // link() publishes the complete record atomically and fails if any owner exists.
-        await link(temporaryPath, lockPath);
-        heldInstanceLocks.set(lockPath, ownerToken);
-        // Dropping the second name changes the file's ctime, so record identity after it.
-        await unlink(temporaryPath);
-        return fileIdentity(await lstat(lockPath), content);
-      } catch (error) {
-        if (error?.code !== "EEXIST") throw error;
-      }
-      let stat;
-      let existing;
-      let record;
-      try {
-        stat = await lstat(lockPath);
-        existing = await readFile(lockPath, "utf8");
-        record = JSON.parse(existing);
-      } catch (error) {
-        if (error?.code === "ENOENT") continue;
-      }
-      if (await instanceLockOwnerIsLive(lockPath, record)) {
-        throw new Error(`another harness supervisor (pid ${record.pid}) is already starting or running for ${lockPath}`);
-      }
-      await unlinkIfOwned(lockPath, fileIdentity(stat, existing));
-    }
-    throw new Error(`could not claim supervisor instance lock ${lockPath}`);
-  } finally {
-    await unlink(temporaryPath).catch(() => {});
-  }
-}
-
-async function releaseInstanceLock(lockPath, ownerToken, identity) {
-  if (heldInstanceLocks.get(lockPath) === ownerToken) heldInstanceLocks.delete(lockPath);
-  await unlinkIfOwned(lockPath, identity);
-}
-
-export const supervisorInternals = {
-  acquireInstanceLock,
-  processIsAlive,
-  pidRecordIsLiveSupervisor,
-  processMatchesSupervisorPidRecord,
-  ownedSupervisorSocketIsListening,
-  ownedSocketPath,
-  preparePidPath,
-  prepareSocketPath,
-};
 
 export class HarnessSupervisor {
   #server;
@@ -2864,129 +2590,13 @@ export class HarnessSupervisor {
     }
   }
 
-  // A frame that is not the live view, as clients are shown it: at most 32 KB.
-  #boundedActorEvent(frame) {
-    const projected = this.#projectActorEvent(frame);
-    if (!projected) return null;
-    try { return Buffer.byteLength(JSON.stringify(projected)) <= 32 * 1024 ? projected : { type: projected.type ?? "unknown", truncated: true }; }
-    catch { return { type: "unknown", truncated: true }; }
-  }
-  #projectActorEvent(frame) {
-    const type = typeof frame?.type === "string" ? frame.type : "unknown";
-    if (type === "progress_entry") {
-      const summary = normalizeProgressHeading(frame.summary);
-      const createdAt = new Date(frame.createdAt);
-      if (!summary || summary !== frame.summary || typeof frame.entryId !== "string" || !frame.entryId
-        || frame.entryId.length > 128 || Number.isNaN(createdAt.valueOf())) return null;
-      return { type, entryId: frame.entryId, summary, createdAt: createdAt.toISOString(), ...birthOrder(frame.harnessBirth) };
-    }
-    if (type === "agent_message_entry") {
-      const createdAt = new Date(frame.createdAt);
-      if (typeof frame.entryId !== "string" || !frame.entryId || frame.entryId.length > 128
-        || typeof frame.messageId !== "string" || !frame.messageId || frame.messageId.length > 128
-        || !["from", "to"].includes(frame.direction) || typeof frame.peerId !== "string" || !frame.peerId || frame.peerId.length > 128
-        || typeof frame.peerName !== "string" || !frame.peerName || frame.peerName.length > 256
-        || Buffer.byteLength(frame.peerName, "utf8") > 1024 || !["parent", "child", "sibling"].includes(frame.relationship)
-        || typeof frame.body !== "string" || !frame.body || Buffer.byteLength(frame.body, "utf8") > 16 * 1024
-        || Number.isNaN(createdAt.valueOf())) return null;
-      return { type, entryId: frame.entryId, messageId: frame.messageId, direction: frame.direction,
-        peerId: frame.peerId, peerName: frame.peerName, relationship: frame.relationship,
-        body: frame.body, createdAt: createdAt.toISOString() };
-    }
-    if (type === "child_creation_entry") {
-      const createdAt = new Date(frame.createdAt);
-      if (typeof frame.entryId !== "string" || !frame.entryId || frame.entryId.length > 128
-        || typeof frame.taskId !== "string" || !frame.taskId || frame.taskId.length > 128
-        || typeof frame.childId !== "string" || !frame.childId || frame.childId.length > 128
-        || typeof frame.childName !== "string" || !frame.childName || frame.childName.length > 256
-        || Buffer.byteLength(frame.childName, "utf8") > 1024 || frame.relationship !== "child"
-        || typeof frame.body !== "string" || !frame.body || Buffer.byteLength(frame.body, "utf8") > 32 * 1024
-        || Number.isNaN(createdAt.valueOf())) return null;
-      return { type, entryId: frame.entryId, taskId: frame.taskId, childId: frame.childId,
-        childName: frame.childName, relationship: "child", body: frame.body, createdAt: createdAt.toISOString() };
-    }
-    if (type === "dialog_request") {
-      const result = { type };
-      for (const key of ["id", "requestId", "method", "title", "message", "placeholder", "prefill", "statusKey", "statusText", "notifyType"]) {
-        if (typeof frame[key] === "string") result[key] = frame[key];
-      }
-      if (Number.isSafeInteger(frame.timeout) && frame.timeout >= 1 && frame.timeout <= 600_000) result.timeout = frame.timeout;
-      if (Array.isArray(frame.options) && frame.options.every((item) => typeof item === "string")) result.options = frame.options.slice(0, 128);
-      return result;
-    }
-    return { type };
-  }
-  #boundedReplay(ring) {
-    let selected = ring.slice(-128).map((item) => ({ seq: item.seq, event: item.event }));
-    let bytes = selected.length > 1 ? Buffer.byteLength(JSON.stringify(selected)) : 0;
-    while (selected.length > 1 && bytes > 40 * 1024) {
-      // Public events are JSON-plain; removing a wrapper also removes one comma.
-      bytes -= Buffer.byteLength(JSON.stringify(selected[0])) + 1;
-      selected.shift();
-    }
-    return selected;
-  }
-  #boundedEntries(data) {
-    const entries = Array.isArray(data?.entries) ? data.entries : []; let selected = entries.slice(-256);
-    let bytes = selected.length ? Buffer.byteLength(JSON.stringify(selected)) : 0;
-    while (selected.length && bytes > 48 * 1024) {
-      const drop = Math.ceil(selected.length / 4);
-      // JSON-plain worker rows make prefix-array bytes minus one the exact decrease.
-      if (drop < selected.length) bytes -= Buffer.byteLength(JSON.stringify(selected.slice(0, drop))) - 1;
-      selected = selected.slice(drop);
-    }
-    return { entries: selected, leafId: data?.leafId ?? null, truncated: selected.length < entries.length };
-  }
-  #encode(frame) {
-    try { return encodeFrame(frame, { maxFrameBytes: this.maxFrameBytes }); }
-    catch (error) {
-      if (error?.code !== "frame_too_large") throw error;
-      const fallback = frame.type === "response"
-        ? errorResponse(frame.id, frame.requestType, new Error("response exceeds protocol frame limit"), "response_too_large")
-        : event("frame_truncated", { originalType: frame.type, originalEvent: frame.event });
-      return encodeFrame(fallback, { maxFrameBytes: this.maxFrameBytes });
-    }
-  }
-  #broadcast(recipients, frame) {
-    let attempted = false, encoded, encodingError;
-    // Resolve inside #write's eligibility check; queues retain only the immutable bytes.
-    const shared = () => {
-      if (!attempted) {
-        attempted = true;
-        try { encoded = this.#encode(frame); } catch (error) { encodingError = error; }
-      }
-      if (encoded === undefined) throw encodingError;
-      return encoded;
-    };
-    for (const state of recipients) this.#write(state, shared);
-  }
-  #write(state, frame, callback) {
-    if (state.closing || state.cleaned || state.socket.destroyed || state.socket.writableEnded) return false;
-    let encoded;
-    try { encoded = typeof frame === "function" ? frame() : Buffer.isBuffer(frame) ? frame : this.#encode(frame); }
-    catch { state.socket.destroy(); return false; }
-    const limit = socketOutputBufferLimit(this.maxFrameBytes);
-    if (state.outputBytes + state.socket.writableLength + encoded.length > limit) {
-      state.socket.destroy(); return false;
-    }
-    state.outputQueue.push({ encoded, callback }); state.outputBytes += encoded.length;
-    this.#flushWrites(state);
-    return !state.socket.destroyed;
-  }
-  #flushWrites(state) {
-    if (state.cleaned || state.socket.destroyed || state.socket.writableEnded) return;
-    while (!state.outputBlocked && state.outputQueueHead < state.outputQueue.length) {
-      const { encoded, callback } = state.outputQueue[state.outputQueueHead];
-      state.outputQueue[state.outputQueueHead++] = undefined; state.outputBytes -= encoded.length;
-      try { state.outputBlocked = !state.socket.write(encoded, callback); }
-      catch { state.socket.destroy(); return; }
-    }
-    if (state.outputQueueHead === state.outputQueue.length) {
-      state.outputQueue = []; state.outputQueueHead = 0;
-    } else if (state.outputQueueHead >= 1024 && state.outputQueueHead * 2 >= state.outputQueue.length) {
-      state.outputQueue = state.outputQueue.slice(state.outputQueueHead); state.outputQueueHead = 0;
-    }
-  }
+  #boundedActorEvent(frame) { return boundedActorEvent(frame); }
+  #boundedReplay(ring) { return boundedReplay(ring); }
+  #boundedEntries(data) { return boundedEntries(data); }
+  #encode(frame) { return encodeSupervisorFrame(frame, this.maxFrameBytes); }
+  #broadcast(recipients, frame) { broadcastFrame(recipients, frame, this.maxFrameBytes); }
+  #write(state, frame, callback) { return writeSocketFrame(state, frame, this.maxFrameBytes, callback); }
+  #flushWrites(state) { flushSocketWrites(state); }
   #cleanupConnection(state) {
     if (state.cleaned) return; state.cleaned = true; state.closing = true;
     for (const job of this.#sessionHistoryJobs) if (job.state === state) job.controller.abort(new Error("history requester disconnected"));

@@ -1,6 +1,7 @@
 ------------------------- MODULE BoundedReconnectReplay -------------------------
 \* Sources:
 \*   src/supervisor.mjs
+\*   src/supervisor-transport.mjs
 
 EXTENDS Naturals, Sequences, TLC
 CONSTANT Fault
