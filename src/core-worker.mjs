@@ -113,6 +113,7 @@ export class CoreWorker {
     this.progressTail = Promise.resolve();
     this.historyTail = Promise.resolve();
     this.deliveredIds = new Set();
+    this.sentInputs = []; // a person's inputs sent to the core and not yet covered by a settle
     this.deliveringInputs = new Set();
     this.reportedInputs = new Set();
     this.savedInputs = new Set();
@@ -323,7 +324,7 @@ export class CoreWorker {
       return { queued: true };
     }
     if (behavior === "steer" && !this.core.busy) throw new Error("cannot steer an idle session");
-    if (this.core.busy) this.core.steer(input); else this.core.send(input);
+    this.#sendInput(input);
     return { accepted: true };
   }
 
@@ -364,7 +365,8 @@ export class CoreWorker {
       this.deliveringInputs.add(inputId);
       const behavior = input.source === "background" ? "auto" : input.behavior;
       // Added now when idle, or at the next safe point of a running turn; reported once saved.
-      void this.core.addContext(this.#stamped(actorInputCustomPayload(input)), behavior === "follow_up" ? { deliver: "follow_up" } : {})
+      void this.core.addContext(this.#stamped(actorInputCustomPayload(input)),
+        { ...(behavior === "follow_up" ? { deliver: "follow_up" } : {}), onAdded: () => this.#taken({ inputId }) })
         .then(() => this.#reportInputs())
         .catch((error) => this.broker.ui.notify(`input ${inputId} was not added: ${error.message}`, "error"))
         .finally(() => this.deliveringInputs.delete(inputId));
@@ -405,7 +407,7 @@ export class CoreWorker {
         this.savedInputs.add(inputId);
         if (!this.reportedInputs.has(inputId)) {
           try {
-            await this.client.request("record_input_delivery", { inputId, entryId: entry.id, deliveredAt: entry.timestamp });
+            await this.client.request("record_input_delivery", { inputId, entryId: entry.id, deliveredAt: entry.timestamp, afterFrame: this.#frames() });
             this.reportedInputs.add(inputId);
           } catch { canAdvance = false; /* tried again at the next report */ }
         }
@@ -600,11 +602,34 @@ export class CoreWorker {
       // Saved by the core before it is acknowledged: a lost ack redelivers, and the
       // delivered ids keep a redelivery out.
       // Every message wakes the session: idle, it starts a turn; mid-turn, it joins at the next safe point.
-      await this.core.addContext(this.#stamped(incomingCustomPayload(message)));
+      await this.core.addContext(this.#stamped(incomingCustomPayload(message)),
+        { onAdded: () => this.#taken({ messageId: message.messageId }) });
       this.deliveredIds.add(message.messageId);
     }
-    if (this.client?.isConnected) await this.client.request("ack_message", { messageId: message.messageId });
+    if (this.client?.isConnected) await this.client.request("ack_message", { messageId: message.messageId, afterFrame: this.#frames() });
   }
+
+  // A person's input: steered into the running turn or sent to start one. The core reports
+  // no admission for it, so it counts as taken at the first settle that covers its op.
+  #sendInput(input) {
+    const op = this.core.busy ? this.core.steer(input) : this.core.send(input);
+    if (input.id) this.sentInputs.push({ op, inputId: input.id });
+  }
+
+  // Before a settle is passed on: the inputs it covers were taken in this turn.
+  #takeCoveredInputs(through) {
+    const covered = this.sentInputs.filter(({ op }) => this.core.covered(op, through));
+    this.sentInputs = this.sentInputs.filter((sent) => !covered.includes(sent));
+    for (const { inputId } of covered) this.#taken({ inputId });
+  }
+
+  // Work the core has taken: the supervisor counts this session busy from here until the
+  // turn that covers it ends (agent_settled). Published in core order, so it always comes
+  // before that turn's end.
+  #taken(ids) { this.publish({ type: "work_taken", ...ids }); }
+
+  // Events published so far: a receipt is applied only after the supervisor has seen them.
+  #frames() { return this.publish.seq ?? 0; }
 
   // An agent message (to or from another session) or a child's creation, kept in history
   // once and reported to the supervisor with its entry id.
@@ -664,6 +689,10 @@ export class CoreWorker {
 
   #onCoreEvent(event) {
     const model = this.model;
+    // A settle's through covers every op the core read, refused ones too; a refused input was
+    // never taken (the core reports the refusal with the op's id before it settles).
+    if (event.ev === "error" && typeof event.id === "string") this.sentInputs = this.sentInputs.filter(({ op }) => op !== event.id);
+    if (event.ev === "settled") this.#takeCoveredInputs(event.through);
     // What the WebUI shows of it; tool bodies and reasoning stay here.
     for (const frame of this.live.core(event, model?.provider)) this.publish(frame);
     switch (event.ev) {
@@ -703,7 +732,7 @@ export class CoreWorker {
         if (turnId) this.#queue("update_progress_heading", { phase: "settled", turnId });
         // A model change held during the turn lands before the next one starts.
         const next = this.followUps.shift();
-        void this.#applySelection().finally(() => { if (next !== undefined) this.core.send(next); });
+        void this.#applySelection().finally(() => { if (next !== undefined) this.#sendInput(next); });
         break;
       }
     }

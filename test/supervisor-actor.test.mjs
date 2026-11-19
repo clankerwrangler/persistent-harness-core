@@ -563,7 +563,8 @@ class FakePiActor extends EventEmitter {
   constructor(options) { super(); this.session = options.session; this.pid = process.pid; this.isRunning = false; this.streaming = false; this.submits = []; this.requests = []; this.submitHold = null; this.submitEntered = 0; }
   async start() { this.isRunning = true; return { sessionId: this.session.sessionId, sessionFile: this.session.sessionFile, isStreaming: false, model: null, thinkingLevel: "off" }; }
   emit(name, value) { if (name === "event" && value?.type === "agent_start") this.streaming = true; if (name === "event" && value?.type === "agent_settled") this.streaming = false;
-    if (name === "event") { value = liveFrame(this, value); if (!value) return false; } return super.emit(name, value); }
+    if (name === "event") { const seq = value?.seq; value = liveFrame(this, value); if (!value) return false; if (seq !== undefined) value = { ...value, seq }; }
+    return super.emit(name, value); }
   async request(type, fields = {}) {
     this.requests.push(type);
     if (type === "get_state") return { sessionId: this.session.sessionId, sessionFile: this.session.sessionFile, isStreaming: this.streaming, model: null, thinkingLevel: "off" };
@@ -2301,6 +2302,161 @@ test("a root that ends its turn with nothing left wakes Home with an idle report
   assert.equal(report.senderId, "room"); assert.equal(report.senderName, "Harness lifecycle");
   assert.match(report.body, /root session room finished its turn and is now idle/);
   assert.equal(room.deliveries.length, 0);
+});
+
+// Home, a room, and a child that finished its first task and went to sleep. The room sends
+// the child a task and ends its turn; the child is woken and handed the message. `emit` sends
+// one of the child's session events numbered as a real session numbers them.
+async function familyIdleFixture(t, name) {
+  const root = await mkdtemp(path.join(os.tmpdir(), `harness-${name}-`));
+  const skillsPath = path.join(root, "skills"); await mkdir(skillsPath);
+  const actors = new Map();
+  await writeFile(path.join(root, "home.json"), JSON.stringify({ sessionId: "home" }));
+  const supervisor = new HarnessSupervisor({ socketPath: path.join(root, "run/sock"), databasePath: path.join(root, "store.sqlite"),
+    pidPath: path.join(root, "run/pid"), skillsPath, actorInactivityMs: 0, notificationTickMs: 20, runtimeProvisioner: async () => ({}),
+    homeSessionPath: path.join(root, "home.json"), logger: { error() {} },
+    actorFactory: options => { const actor = new EarlyRegisteringActor(options); actors.set(options.session.sessionId, actor); return actor; },
+    processIdentityFactory: async pid => ({ version: 1, pid, processGroup: pid, startTime: "fake", ownerToken: "fake" }),
+    processTerminator: async () => ({ terminated: true }) });
+  await supervisor.start(); t.after(async () => { await supervisor.stop(); await rm(root, { recursive: true, force: true }); });
+  const header = id => JSON.stringify({ type: "session", version: 3, id, cwd: root, timestamp: new Date().toISOString() }) + "\n";
+  for (const id of ["home", "room"]) {
+    await writeFile(path.join(root, `${id}.jsonl`), header(id));
+    supervisor.store.createRoot({ sessionId: id, sessionFile: path.join(root, `${id}.jsonl`), cwd: root, name: id, actorToken: `${id}-token`, launch: {} });
+    supervisor.store.markActorLifecycle(id, 1, "passivated");
+  }
+  await writeFile(path.join(root, "helper.jsonl"), header("helper"));
+  supervisor.store.createChild("room", { sessionId: "helper", sessionFile: path.join(root, "helper.jsonl"), actorToken: "helper-token",
+    policy: { cwd: root, depth: 1, name: "helper", prompt: "first task" } });
+  supervisor.store.markChildTaskSubmitted(supervisor.store.nextQueuedChildTask("helper").taskId);
+  supervisor.store.completeSubmittedChildTask("helper");
+  supervisor.store.markActorLifecycle("helper", 1, "passivated");
+  const reports = () => supervisor.store.listMessages().filter(m => m.targetId === "home" && /is now idle/.test(m.body));
+
+  const client = new HarnessClient({ requestTimeoutMs: 120_000, socketPath: supervisor.socketPath, heartbeatMs: 0 });
+  await client.start({ registrationType: "register_client", clientInstanceId: name }); t.after(() => client.stop());
+  await client.request("revive_session", { sessionId: "room" });
+  const room = await eventually(() => actors.get("room")); await eventually(() => room.isRunning);
+  await eventually(() => supervisor.store.getSession("room")?.lifecycle === "resident");
+  room.emit("event", { type: "agent_start" });
+  await eventually(() => supervisor.store.getSession("room").activity === "working");
+  const sent = (await room.control.request("send_message", { target: "helper", body: "next task", deliveryMode: "auto" })).message;
+  await room.control.request("record_agent_message_entry", { entryId: "room-entry-1", messageId: sent.messageId, direction: "to",
+    peerId: "helper", peerName: "helper", relationship: sent.relationship, body: "next task", createdAt: new Date().toISOString() });
+  room.emit("event", { type: "agent_settled" });
+  await eventually(() => supervisor.store.getSession("room").activity !== "working");
+  assert.equal(reports().length, 0, "the child has not taken its work yet");
+  const helper = await eventually(() => actors.get("helper"), 120_000);
+  await eventually(() => helper.deliveries.find(m => m.messageId === sent.messageId), 120_000);
+  assert.equal(reports().length, 0, "delivered is still waiting");
+  const numbers = new Map();
+  const emit = (actor, frame) => {
+    const seq = (numbers.get(actor) ?? 0) + 1; numbers.set(actor, seq);
+    actor.emit("event", { ...frame, seq }); return seq;
+  };
+  return { supervisor, actors, reports, room, helper, sent, emit,
+    activity: (id) => supervisor.store.getSession(id).activity,
+    messageState: () => supervisor.store.getMessage(sent.messageId).state,
+    ack: (afterFrame) => helper.control.request("ack_message", { messageId: sent.messageId, afterFrame }) };
+}
+const pause = (ms = 150) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("a root that hands work to its sleeping child is reported once the child has done it", async (t) => {
+  const f = await familyIdleFixture(t, "family-idle-home");
+  const taken = f.emit(f.helper, { type: "work_taken", messageId: f.sent.messageId });
+  assert.equal(f.activity("helper"), "working", "taken work keeps the child busy");
+  f.emit(f.helper, { type: "agent_start" });
+  await f.ack(taken);
+  assert.equal(f.reports().length, 0, "the child is working");
+  f.emit(f.helper, { type: "agent_settled" });
+  const home = await eventually(() => f.actors.get("home"), 120_000);
+  const report = await eventually(() => home.deliveries[0], 120_000);
+  assert.equal(report.senderId, "room", "the report is about the root");
+  assert.match(report.body, /root session room finished its turn and is now idle/);
+  assert.equal(f.reports().length, 1);
+});
+
+test("an acknowledgement that overtakes the child's own events waits for them", async (t) => {
+  // The core reports the message saved before the turn it wakes, and the acknowledgement
+  // travels apart from the session's events: it can arrive first.
+  const f = await familyIdleFixture(t, "family-ack-first");
+  const ack = f.ack(1);
+  await pause();
+  assert.equal(f.messageState(), "delivered", "held until the session's first event is seen");
+  assert.equal(f.reports().length, 0);
+  f.emit(f.helper, { type: "work_taken", messageId: f.sent.messageId });
+  await ack;
+  assert.equal(f.messageState(), "acknowledged");
+  assert.equal(f.activity("helper"), "working", "busy before its turn has started");
+  assert.equal(f.reports().length, 0);
+  f.emit(f.helper, { type: "agent_start" }); f.emit(f.helper, { type: "agent_settled" });
+  await eventually(() => f.reports().length === 1);
+});
+
+test("a turn that ended before its acknowledgement arrived is reported at its end", async (t) => {
+  const f = await familyIdleFixture(t, "family-late-ack");
+  const taken = f.emit(f.helper, { type: "work_taken", messageId: f.sent.messageId });
+  f.emit(f.helper, { type: "agent_start" }); f.emit(f.helper, { type: "agent_settled" });
+  await eventually(() => f.reports().length === 1);
+  assert.equal(f.messageState(), "delivered", "its acknowledgement is still on its way");
+  await f.ack(taken);
+  assert.equal(f.messageState(), "acknowledged");
+  await pause();
+  assert.equal(f.reports().length, 1, "an acknowledgement never reports");
+});
+
+test("a message that joins a running turn is done when that turn ends", async (t) => {
+  const f = await familyIdleFixture(t, "family-join");
+  f.emit(f.helper, { type: "agent_start" });
+  const taken = f.emit(f.helper, { type: "work_taken", messageId: f.sent.messageId });
+  await f.ack(taken);
+  await pause();
+  assert.equal(f.reports().length, 0);
+  f.emit(f.helper, { type: "agent_settled" });
+  await eventually(() => f.reports().length === 1);
+});
+
+test("an earlier turn ending does not finish work the core has not taken yet", async (t) => {
+  const f = await familyIdleFixture(t, "family-previous-settle");
+  f.emit(f.helper, { type: "agent_start" });
+  f.emit(f.helper, { type: "agent_settled" });
+  await pause();
+  assert.equal(f.reports().length, 0, "the delivered message is still waiting");
+  const taken = f.emit(f.helper, { type: "work_taken", messageId: f.sent.messageId });
+  f.emit(f.helper, { type: "agent_start" });
+  await f.ack(taken);
+  f.emit(f.helper, { type: "agent_settled" });
+  await eventually(() => f.reports().length === 1);
+});
+
+test("an input taken by a turn that runs no further is done at that settle", async (t) => {
+  const f = await familyIdleFixture(t, "family-abort-input");
+  const taken = f.emit(f.helper, { type: "work_taken", messageId: f.sent.messageId });
+  f.emit(f.helper, { type: "agent_start" }); await f.ack(taken); f.emit(f.helper, { type: "agent_settled" });
+  await eventually(() => f.reports().length === 1);
+  // An aborted turn: the core took the person's input and settled without another turn.
+  const input = f.supervisor.store.createActorInput("room", { message: "one more thing" });
+  f.room.emit("event", { type: "work_taken", inputId: input.inputId });
+  assert.equal(f.activity("room"), "working");
+  f.room.emit("event", { type: "agent_settled" });
+  await eventually(() => f.reports().length === 2);
+  assert.ok(f.supervisor.store.getActorInput(input.inputId, "room"), "its receipt has not arrived");
+});
+
+test("a session that exits before the events its acknowledgement follows keeps the message pending", async (t) => {
+  const f = await familyIdleFixture(t, "family-exit");
+  f.emit(f.helper, { type: "work_taken", messageId: f.sent.messageId });
+  assert.equal(f.activity("helper"), "working");
+  // The acknowledgement follows five events; only one ever arrives.
+  const ack = f.ack(5).then(() => "applied", () => "refused");
+  await pause();
+  assert.equal(f.messageState(), "delivered");
+  await f.helper.close();
+  assert.equal(await ack, "refused", "a fence that can no longer be met refuses the acknowledgement");
+  assert.equal(f.messageState(), "delivered", "the message stays pending for redelivery");
+  await eventually(() => f.activity("helper") !== "working");
+  await pause();
+  assert.equal(f.reports().length, 0, "pending work and the child's exit keep the family busy");
 });
 
 async function homeNudgeFixture(t, name, homeNudge) {

@@ -48,7 +48,64 @@ test("inputs already in history at startup are the supervisor's to reconcile; ne
   core.emit("event", { ev: "settled", through: null });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.deepEqual(requests.filter((r) => r.type === "record_input_delivery").map((r) => r.params),
-    [{ inputId: "new-input", entryId: "3", deliveredAt: new Date(1).toISOString() }]);
+    [{ inputId: "new-input", entryId: "3", deliveredAt: new Date(1).toISOString(), afterFrame: 0 }]);
+  await worker.close();
+});
+
+test("work the core takes is published in core order, before the settle that covers it", async (t) => {
+  const requests = supervisorConnection(t);
+  const frames = [];
+  const publish = (frame) => { frames.push({ ...frame, seq: publish.seq + 1 }); publish.seq += 1; };
+  publish.seq = 0;
+  const core = fakeCore([]);
+  const added = [];
+  core.addContext = async (message, { onAdded } = {}) => { onAdded?.({ n: 7 }); added.push(message); return 7; };
+  let next = 0;
+  core.send = () => `js${++next}`; core.steer = () => `js${++next}`;
+  core.covered = (id, through) => Number(String(through).slice(2)) >= Number(id.slice(2));
+  const worker = new CoreWorker({ core, options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
+    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish, agentDir: os.tmpdir() });
+  await worker.start();
+
+  // A family message: taken when the core saves it, acknowledged after that event.
+  worker.client.emit("event", { event: "message_available", data: { message: {
+    messageId: "m1", senderId: "parent", senderName: "Home", relationship: "parent", body: "go" } } });
+  await worker.historyTail;
+  assert.equal(added.length, 1);
+  // A person's input: taken at the first settle that covers its op, not before.
+  await worker.handle({ type: "prompt", message: "hello", messageId: "in1" });
+  await worker.handle({ type: "prompt", message: "more", messageId: "in2" });
+  assert.deepEqual(frames.filter((f) => f.type === "work_taken").map((f) => f.messageId ?? f.inputId), ["m1"]);
+  core.emit("event", { ev: "turn_start" });
+  core.emit("event", { ev: "settled", through: "js1" });
+  const taken = frames.filter((f) => f.type === "work_taken");
+  assert.deepEqual(taken.map((f) => f.messageId ?? f.inputId), ["m1", "in1"], "in2 is not covered by js1");
+  const settle = frames.findIndex((f) => f.type === "live_event" && f.event?.type === "agent_settled");
+  assert.ok(settle >= 0 && frames.indexOf(taken[1]) < settle, "taken comes before the settle that covers it");
+  const ack = requests.find((r) => r.type === "ack_message");
+  assert.equal(ack.params.afterFrame, taken[0].seq, "the acknowledgement follows its taken event");
+  await worker.close();
+});
+
+test("an input the core refused is not counted as taken by the settle that covers its op", async (t) => {
+  supervisorConnection(t);
+  const frames = [];
+  const publish = (frame) => { frames.push(frame); };
+  const core = fakeCore([]);
+  let next = 0;
+  core.send = () => `js${++next}`; core.steer = () => `js${++next}`;
+  core.covered = (id, through) => Number(String(through).slice(2)) >= Number(id.slice(2));
+  const worker = new CoreWorker({ core, options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
+    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish, agentDir: os.tmpdir() });
+  await worker.start();
+  await worker.handle({ type: "prompt", message: "bad", messageId: "refused" });
+  await worker.handle({ type: "prompt", message: "good", messageId: "kept" });
+  core.emit("event", { ev: "error", id: "js1", op: "send", error: "send needs input" });
+  core.emit("event", { ev: "turn_start" });
+  core.emit("event", { ev: "settled", through: "js2" });
+  assert.deepEqual(frames.filter((f) => f.type === "work_taken").map((f) => f.inputId), ["kept"]);
   await worker.close();
 });
 

@@ -84,7 +84,10 @@ export async function runWorkerRpc({ input = process.stdin, output = process.std
   const activeIds = new Set();
   let closing = false, shutdownRequested = false, drainingShutdown = false, fatalError, worker, finish, boot;
   const done = new Promise((resolve) => { finish = resolve; });
+  // Every event (not a response) is numbered in the order written. A request that must be
+  // applied after the events before it carries `publish.seq` (supervisor: #afterFrames).
   const publish = (frame) => {
+    if (frame?.type !== "response") frame = { ...frame, seq: publish.seq + 1 };
     const line = `${JSON.stringify(frame)}\n`;
     if (Buffer.byteLength(line) > MAX_WORKER_FRAME_BYTES + 1 || output.writableLength + Buffer.byteLength(line) > MAX_WORKER_FRAME_BYTES + 256 * 1024) {
       const error = new Error("Actor RPC output buffer limit exceeded");
@@ -92,7 +95,9 @@ export async function runWorkerRpc({ input = process.stdin, output = process.std
       throw error;
     }
     output.write(line);
+    if (frame?.type !== "response") publish.seq = frame.seq;
   };
+  publish.seq = 0;
   const broker = new DialogBroker(publish, { onChange: () => { void drainShutdown(); } });
   const lifecycle = { requestShutdown: () => { shutdownRequested = true; queueMicrotask(() => { void drainShutdown(); }); } };
   async function drainShutdown() {

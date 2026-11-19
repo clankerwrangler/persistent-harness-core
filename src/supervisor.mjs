@@ -269,6 +269,7 @@ export class HarnessSupervisor {
     // Home (named in home.json beside the database) hears when another root exits or a turn fails.
     this.#homeSessionPath = this.homeSessionPath ?? path.join(path.dirname(this.databasePath), "home.json");
     this.#store.rootFailureObserver = () => this.#homeSessionId();
+    this.#store.coveredWork = () => this.#coveredWork();
     try {
       this.#cronStore = this.cronStoreFactory(this.databasePath, { db: this.#store.database });
       this.#notifications = new NotificationStore(this.databasePath, { idleMs: this.notificationIdleMs, db: this.#store.database });
@@ -503,7 +504,10 @@ export class HarnessSupervisor {
       const continuationOwner = pending?.targetId === state.sessionId && pending.state === "delivered"
         ? `message\0${pending.messageId}` : undefined;
       return { continuationOwner, run: async () => {
+        await this.#afterFrames(state.sessionId, state.generation, params.afterFrame);
+        this.#requireFence(state.sessionId, state.generation, params.afterFrame);
         const message = this.store.acknowledgeMessage(params.messageId, state.sessionId);
+        this.#receiptApplied(state.sessionId, state.generation, "messages", message.messageId);
         state.deliveryInFlight.delete(message.messageId);
         await this.#publishFamilyAdmission(state.sessionId, message.messageId).catch(error => this.logger.error?.(error));
         this.#syncPassivationTimer(state.sessionId);
@@ -514,6 +518,7 @@ export class HarnessSupervisor {
   }
 
   async #recordInputDelivery(state, params, input) {
+    await this.#afterFrames(state.sessionId, state.generation, params.afterFrame);
     const session = this.store.getSession(state.sessionId);
     const transcript = await this.transcriptReader.read({ sessionFile: session.sessionFile, sessionId: state.sessionId,
       inputProofIds: [params.inputId], familyDeliveryOnly: true });
@@ -521,7 +526,10 @@ export class HarnessSupervisor {
     if (!proof || proof.entryId !== params.entryId || Date.parse(proof.deliveredAt) !== Date.parse(params.deliveredAt)) {
       throw new Error("input delivery is not present in the canonical transcript");
     }
+    // The transcript read was asynchronous: the session may have exited or been replaced.
+    this.#requireFence(state.sessionId, state.generation, params.afterFrame);
     const newlyDelivered = this.#completeInputDelivery(state.sessionId, input, proof, transcript);
+    this.#receiptApplied(state.sessionId, state.generation, "inputs", params.inputId);
     return { accepted: true, newlyDelivered, input: this.store.getActorInput(params.inputId, state.sessionId) };
   }
 
@@ -1603,6 +1611,7 @@ export class HarnessSupervisor {
     const worker = this.actorFactory({ command: process.execPath, args: [...ACTOR_NODE_FLAGS, CORE_ACTOR_WORKER, ...this.#actorArgs(session)], cwd: session.cwd, env: this.#actorEnv(session, compileCache, generationSkillGrantPath, scratch), startupTimeoutMs: this.actorStartupTimeoutMs, promptPreflightTimeoutMs: this.actorPromptPreflightTimeoutMs,
       shutdownTimeoutMs: this.actorShutdownTimeoutMs, session });
     const record = { worker, generation: session.actorGeneration, rootOutputSession: Object.freeze({ sessionId: session.sessionId, kind: session.kind, depth: session.depth }), expectedLifecycle: null, exitError: null, eventSeq: 0, eventRing: [], eventRingBytes: 0, progressSummary: undefined, progressTurnId: null,
+      framesSeen: 0, frameWaiters: [], taken: { messages: new Set(), inputs: new Set() }, covered: { messages: new Set(), inputs: new Set() },
       skillGrantFingerprint: skillGrant.fingerprint, skillGrantSkills: skillGrant.skills, skillRefreshPending: false,
       notificationWork: new Set(), messageTransportRepairAttempted: false, liveConversation: new LiveConversation() }; this.#actors.set(sessionId, record);
     worker.on("event", (frame) => this.#onActorEvent(sessionId, record, frame)); worker.on("protocolError", (error) => this.logger.error?.(`actor ${sessionId} RPC protocol error: ${error.message}`)); worker.on("exit", (details) => this.#onActorExit(sessionId, record, details));
@@ -1896,7 +1905,68 @@ export class HarnessSupervisor {
   // capture. The supervisor's own events about the session (progress, agent messages,
   // children) and the session's dialogs and model changes are shaped here.
   #onActorEvent(sessionId, record, frame) {
+    try { this.#handleActorEvent(sessionId, record, frame); } finally { this.#frameSeen(record, frame); }
+  }
+
+  // Receipts (ack_message, record_input_delivery) say how many session events came before
+  // them and are applied only after those, so a receipt never overtakes the work it is for.
+  #frameSeen(record, frame) {
+    if (!Number.isSafeInteger(frame?.seq) || frame.seq <= record.framesSeen) return;
+    record.framesSeen = frame.seq;
+    const ready = record.frameWaiters.filter((waiter) => waiter.afterFrame <= record.framesSeen);
+    record.frameWaiters = record.frameWaiters.filter((waiter) => waiter.afterFrame > record.framesSeen);
+    for (const waiter of ready) waiter.resolve();
+  }
+  // Waits until the session's events before a receipt have been seen. A receipt whose events
+  // can no longer arrive (the session exited or was replaced) is refused, and #requireFence
+  // checks again right before the receipt changes anything, so it never lands unfenced.
+  async #afterFrames(sessionId, generation, afterFrame) {
+    if (afterFrame === undefined) return;
+    const record = this.#fenceRecord(sessionId, generation);
+    if (record.framesSeen >= afterFrame) return;
+    await new Promise((resolve, reject) => record.frameWaiters.push({ afterFrame, resolve, reject }));
+  }
+  #requireFence(sessionId, generation, afterFrame) {
+    if (afterFrame === undefined) return;
+    if (this.#fenceRecord(sessionId, generation).framesSeen < afterFrame) throw new Error("receipt arrived before the session events it follows");
+  }
+  #fenceRecord(sessionId, generation) {
+    const record = this.#actors.get(sessionId);
+    if (!record || record.generation !== generation) throw new Error("receipt refused: its session is no longer running");
+    return record;
+  }
+
+  // Work the session's core has taken (a message, a cron or background input, or a
+  // person's input): the session counts as busy from here until its next agent_settled,
+  // which covers it. Covered work is not pending, even before its receipt arrives.
+  #workTaken(sessionId, record, frame) {
+    for (const [key, kind] of [["messageId", "messages"], ["inputId", "inputs"]]) {
+      if (typeof frame[key] === "string" && frame[key] && frame[key].length <= 128) record.taken[kind].add(frame[key]);
+    }
+    if (this.store.getSession(sessionId)?.activity !== "working") this.store.setActorActivity(sessionId, record.generation, true);
+  }
+  #coverTaken(record) {
+    for (const kind of ["messages", "inputs"]) {
+      for (const id of record.taken[kind]) record.covered[kind].add(id);
+      record.taken[kind].clear();
+    }
+  }
+  // Covered work whose receipt is still on its way, across live sessions (store.coveredWork).
+  #coveredWork() {
+    const work = { messages: new Set(), inputs: new Set() };
+    for (const record of this.#actors.values()) {
+      for (const kind of ["messages", "inputs"]) for (const id of record.covered?.[kind] ?? []) work[kind].add(id);
+    }
+    return work;
+  }
+  #receiptApplied(sessionId, generation, kind, id) {
+    const record = this.#actors.get(sessionId);
+    if (record?.generation === generation) { record.covered[kind].delete(id); record.taken[kind].delete(id); }
+  }
+
+  #handleActorEvent(sessionId, record, frame) {
     if (this.#actors.get(sessionId) !== record) return;
+    if (frame?.type === "work_taken") { this.#workTaken(sessionId, record, frame); return; }
     // A turn chained onto a working stretch.
     if (frame?.type === "live_activity") { this.store.recordSessionActivity(sessionId); return; }
     const live = frame?.type === "live_event";
@@ -1954,6 +2024,7 @@ export class HarnessSupervisor {
         const failure = this.store.submittedChildTask?.(sessionId) && typeof frame.failure === "string" ? frame.failure : null;
         this.store.completeSubmittedChildTask?.(sessionId, failure);
         if (failure) this.store.recordSessionLastError?.(sessionId, record.generation, failure);
+        this.#coverTaken(record);
         this.store.setActorActivity(sessionId, record.generation, false);
         this.#retryChildExitMessages(); // delivers a root-idle report to Home, if one was queued
         this.#queueHistoryMaintenance(sessionId, { invalidate: true });
@@ -1990,6 +2061,8 @@ export class HarnessSupervisor {
     // unexpected-exit owner must publish before retirement removes its fence.
     if (lifecycle === "error") this.#publishActorInputFailure(sessionId, record);
     this.#actors.delete(sessionId); this.#clearPassivation(sessionId);
+    // No more events will come: receipts still waiting for some are refused, unapplied.
+    for (const waiter of record.frameWaiters.splice(0)) waiter.reject(new Error("receipt refused: its session exited before the events it follows"));
     this.#clearDialogRequests(sessionId, record.generation);
     this.#rootOutput.failSession(sessionId, record.generation, record.expectedLifecycle ?? "actor_exit");
     this.store.markActorLifecycle(sessionId, record.generation, lifecycle, error, Date.now(), { reportChildExit: true }); if (error || lifecycle === "stopped") this.store.completeSubmittedChildTask?.(sessionId, error ?? "actor was explicitly stopped");

@@ -858,6 +858,7 @@ test("Home hears when another root ends a turn and goes idle", async (t) => {
   store.createChild("room-a", { sessionId: "helper", sessionFile: "/sessions/helper.jsonl", actorToken: "helper-token",
     policy: { ...launch("helper", "work"), cwd: "/example", repositoryRoot: null, depth: 1 }, now: 2 });
   store.markActorStarted("helper", 1, { pid: 1, processIdentity: { startTime: 1 } }, 2);
+  store.markChildTaskSubmitted(store.nextQueuedChildTask("helper").taskId, 2); store.completeSubmittedChildTask("helper", null, 2);
   const reports = () => store.listPendingChildExitMessages().filter(m => m.targetId === "home" && /is now idle/.test(m.body));
   store.setActorActivity("room-a", 1, true, 3); store.setActorActivity("room-a", 1, false, 4);
   assert.equal(reports().length, 0, "no observer configured: nobody is told");
@@ -876,16 +877,86 @@ test("Home hears when another root ends a turn and goes idle", async (t) => {
   store.setActorActivity("room-a", 1, true, 9); store.setActorActivity("room-a", 1, false, 10);
   assert.equal(reports().length, 1, "waiting on a working child is not idle");
   store.setActorActivity("helper", 1, false, 11);
-  assert.equal(reports().length, 1, "the child's result will wake it, so its finishing is not reported");
+  assert.equal(reports().length, 2, "a child finishing last makes the family quiet");
+  assert.equal(reports()[1].senderId, "room-a", "the report is about the root, not the child");
 
-  store.setActorActivity("room-a", 1, true, 12);
+  // A child that reports back wakes its parent: the family is not quiet until the parent is done.
+  const send = (from, to, body, at) => {
+    const message = store.createMessage(from, { target: to, body }, { now: at });
+    store.recordMessageSenderEntry(from, { messageId: message.messageId, entryId: `entry-${at}`, peerId: to,
+      relationship: message.relationship, body }, at);
+    return message;
+  };
+  store.setActorActivity("helper", 1, true, 12);
+  const result = send("helper", "room-a", "done", 13);
+  store.setActorActivity("helper", 1, false, 14);
+  assert.equal(reports().length, 2, "a result waiting for the parent is not quiet");
+  store.markMessageDelivered(result.messageId, "room-a", 15);
+  store.setActorActivity("room-a", 1, true, 16); store.acknowledgeMessage(result.messageId, "room-a", 17);
+  store.setActorActivity("room-a", 1, false, 18);
+  assert.equal(reports().length, 3);
+
+  // The root settles before its sleeping child takes queued work.
+  store.markActorLifecycle("helper", 1, "passivated", null, 19);
+  store.setActorActivity("room-a", 1, true, 20);
+  const task = send("room-a", "helper", "next task", 21);
+  store.setActorActivity("room-a", 1, false, 22);
+  assert.equal(reports().length, 3, "work waiting for a sleeping child is not quiet");
+  store.prepareActorRevival("helper", "helper-token-2"); store.markActorStarted("helper", 2, {}, 23);
+  store.markMessageDelivered(task.messageId, "helper", 24);
+  store.acknowledgeMessage(task.messageId, "helper", 25);
+  assert.equal(reports().length, 3, "an acknowledgement seen before its turn starts is no reason to report");
+  store.setActorActivity("helper", 2, true, 26); store.setActorActivity("helper", 2, false, 27);
+  assert.equal(reports().length, 4, "the child's turn ending reports");
+
+  // A turn that covered a message has finished it, even if its acknowledgement is late.
+  store.setActorActivity("room-a", 1, true, 28);
+  const late = send("room-a", "helper", "another task", 29);
+  store.setActorActivity("room-a", 1, false, 30);
+  store.markMessageDelivered(late.messageId, "helper", 31);
+  store.setActorActivity("helper", 2, true, 32);
+  store.coveredWork = () => ({ messages: new Set([late.messageId]), inputs: new Set() });
+  store.setActorActivity("helper", 2, false, 33);
+  assert.equal(reports().length, 5, "covered work is done, not waiting");
+  store.acknowledgeMessage(late.messageId, "helper", 34);
+  store.coveredWork = () => ({ messages: new Set(), inputs: new Set() });
+  assert.equal(reports().length, 5, "an acknowledgement never reports");
+
+  // A delivered message the core has not taken still counts, whatever ends meanwhile.
+  store.setActorActivity("room-a", 1, true, 35);
+  const untaken = send("room-a", "helper", "a further task", 36);
+  store.setActorActivity("room-a", 1, false, 37);
+  store.markMessageDelivered(untaken.messageId, "helper", 38);
+  store.setActorActivity("helper", 2, true, 39); store.setActorActivity("helper", 2, false, 39);
+  assert.equal(reports().length, 5, "an earlier turn's end does not finish newer work");
+  store.acknowledgeMessage(untaken.messageId, "helper", 40);
+  assert.equal(reports().length, 5, "an acknowledgement never reports");
+  store.setActorActivity("helper", 2, true, 40); store.setActorActivity("helper", 2, false, 40);
+  assert.equal(reports().length, 6, "the turn that took it reports");
+
+  // A message waiting for its sender's history entry is already on its way.
+  store.setActorActivity("room-a", 1, true, 41);
+  const unrecorded = store.createMessage("room-a", { target: "helper", body: "not yet recorded" }, { now: 42 });
+  store.setActorActivity("room-a", 1, false, 43);
+  assert.equal(reports().length, 6, "an accepted message is pending work");
+  store.recordMessageSenderEntry("room-a", { messageId: unrecorded.messageId, entryId: "entry-44", peerId: "helper",
+    relationship: unrecorded.relationship, body: "not yet recorded" }, 44);
+  store.markMessageDelivered(unrecorded.messageId, "helper", 45);
+  store.setActorActivity("helper", 2, true, 46); store.acknowledgeMessage(unrecorded.messageId, "helper", 47);
+  store.setActorActivity("helper", 2, false, 48);
+  assert.equal(reports().length, 7);
+
+  store.setActorActivity("helper", 2, true, 49);
+  store.markActorLifecycle("helper", 2, "stopped", null, 50);
+  assert.equal(reports().length, 8, "a child stopped mid-turn ends that turn");
+
+  store.setActorActivity("room-a", 1, true, 51);
   store.createActorInput("room-a", { message: "one more thing" });
-  store.setActorActivity("room-a", 1, false, 13);
-  assert.equal(reports().length, 1, "input waiting means it starts again at once");
+  store.setActorActivity("room-a", 1, false, 52);
+  assert.equal(reports().length, 8, "input waiting means it starts again at once");
 
-  store.setActorActivity("helper", 1, true, 14); store.setActorActivity("helper", 1, false, 15);
-  store.setActorActivity("home", 1, true, 16); store.setActorActivity("home", 1, false, 17);
-  assert.equal(reports().length, 1, "children and the observer are never reported");
+  store.setActorActivity("home", 1, true, 53); store.setActorActivity("home", 1, false, 54);
+  assert.equal(reports().length, 8, "the observer is never reported");
 });
 
 test("lifetime usage summary stays current after it is first read", async (t) => {

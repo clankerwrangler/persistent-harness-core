@@ -31,6 +31,8 @@ export class HarnessStore {
   #db;
   // The root that hears about other roots' abnormal exits and turns (Home), or null.
   rootFailureObserver = () => null;
+  // Messages and inputs a settle has covered whose receipts have not arrived (supervisor).
+  coveredWork = () => ({ messages: new Set(), inputs: new Set() });
   #deletingSessions = new Set();
   #usage;
 
@@ -526,6 +528,8 @@ export class HarnessStore {
       if (result.changes !== 1) { this.#db.exec("COMMIT"); return false; }
       if (reportChildExit && lifecycle === "error") this.#queueChildFailure(sessionId, generation, error, now);
       this.#refreshAncestors(sessionId, now);
+      // A child stopped mid-turn ends that turn without a settle.
+      if (previous.streaming && previous.kind === "child") this.#reportQuietFamily(sessionId, now);
       this.#db.exec("COMMIT");
       return true;
     } catch (failure) { this.#db.exec("ROLLBACK"); throw failure; }
@@ -605,17 +609,25 @@ export class HarnessStore {
       .run(streaming ? 1 : 0, activity, !streaming ? (row.quiet_since ?? now) : null,
         changed ? now : row.updated_at, sessionId);
     this.#refreshAncestors(sessionId, now);
-    if (row.streaming && activity === "idle") this.#queueRootIdle(row, generation, now);
+    if (row.streaming && !streaming) this.#reportQuietFamily(sessionId, now);
     return this.#mappedSession(sessionId);
   }
 
-  // Report a root's idle transition only when it has no active children or pending work.
-  // The report describes the transition; later input may start the root again.
-  #queueRootIdle(row, generation, now) {
+  // Home hears when a root's family (the root and its descendants) goes quiet: nobody is in
+  // a turn and no input, task or message waits for anyone. It is checked only when a member's
+  // turn ends (specification/RootIdleReport.tla). A member is in a turn from the moment its
+  // core takes work until the settle that covers it; covered work whose receipt is still on
+  // its way (coveredWork, from the supervisor) is done, not waiting. The report describes the
+  // transition; later input may start the family again.
+  #reportQuietFamily(memberId, now) {
+    let row = this.#sessionRow(memberId);
+    const seen = new Set();
+    while (row?.parent_session_id && !seen.has(row.id)) { seen.add(row.id); row = this.#sessionRow(row.parent_session_id); }
     const homeId = this.rootFailureObserver();
-    const home = typeof homeId === "string" && homeId !== row.id ? this.#sessionRow(homeId) : null;
-    if (row.kind !== "root" || home?.kind !== "root" || home.lifecycle === "deleted" || this.isSessionDeleting(home.id)
-      || this.isSessionDeleting(row.id) || this.hasPendingSessionWork(row.id)) return;
+    const home = row && typeof homeId === "string" && homeId !== row.id ? this.#sessionRow(homeId) : null;
+    if (row?.kind !== "root" || row.lifecycle === "deleted" || home?.kind !== "root" || home.lifecycle === "deleted"
+      || this.isSessionDeleting(home.id) || this.isSessionDeleting(row.id) || !this.#familyQuiet(row.id)) return;
+    const generation = row.actor_generation;
     const identity = /^[a-zA-Z0-9-]{1,128}$/.test(row.id) ? row.id : "[invalid session ID]";
     const id = `root-idle:${createHash("sha256").update(row.id).update("\0").update(String(generation)).update("\0").update(String(now)).digest("hex")}`;
     const body = `Harness lifecycle report (supervisor-generated, not session-authored): root session ${identity} finished its turn and is now idle.`;
@@ -623,6 +635,26 @@ export class HarnessStore {
       (id, sender_id, target_id, relationship, delivery_mode, body, state, attempt_count, accepted_at, queued_at, child_exit_generation)
       VALUES (?, ?, ?, 'sibling', 'auto', ?, 'queued', 0, ?, ?, ?)`)
       .run(id, row.id, home.id, body, now, now, generation);
+  }
+
+  // A child task counts only while its child can still run it; a failed child's
+  // unfinished task would otherwise keep its family busy for good.
+  #familyQuiet(rootId) {
+    const covered = this.coveredWork();
+    return Boolean(this.#db.prepare(`
+      WITH RECURSIVE family(id) AS (
+        SELECT id FROM sessions WHERE id = ?
+        UNION
+        SELECT s.id FROM sessions s JOIN family f ON s.parent_session_id = f.id WHERE s.lifecycle <> 'deleted'
+      )
+      SELECT NOT EXISTS (SELECT 1 FROM sessions WHERE id IN family AND streaming = 1)
+        AND NOT EXISTS (SELECT 1 FROM actor_inputs WHERE session_id IN family AND id NOT IN (SELECT value FROM json_each(?)))
+        AND NOT EXISTS (SELECT 1 FROM messages WHERE target_id IN family AND state IN ('accepted', 'queued', 'delivered')
+          AND id NOT IN (SELECT value FROM json_each(?)))
+        AND NOT EXISTS (SELECT 1 FROM child_tasks t JOIN sessions s ON s.id = t.child_id
+          WHERE t.child_id IN family AND t.state IN ('queued', 'submitted') AND s.lifecycle IN ('starting', 'resident', 'passivated'))
+        AS quiet
+    `).get(rootId, JSON.stringify([...covered.inputs]), JSON.stringify([...covered.messages])).quiet);
   }
 
   #refreshAncestors(sessionId, now) {

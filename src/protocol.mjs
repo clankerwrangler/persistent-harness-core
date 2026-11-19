@@ -225,10 +225,15 @@ function actorInputId(params) {
   return { inputId: string(value.inputId, "params.inputId", 128) };
 }
 function actorInputDelivery(params) {
-  const value = record(params, "params"); exact(value, new Set(["inputId", "entryId", "deliveredAt"]), "params");
+  const value = record(params, "params"); exact(value, new Set(["inputId", "entryId", "deliveredAt", "afterFrame"]), "params");
   const deliveredAt = string(value.deliveredAt, "params.deliveredAt", 64);
   if (!Number.isFinite(Date.parse(deliveredAt))) throw new ProtocolError("invalid_request", "params.deliveredAt must be an ISO timestamp");
-  return { inputId: string(value.inputId, "params.inputId", 128), entryId: string(value.entryId, "params.entryId", 128), deliveredAt };
+  return { inputId: string(value.inputId, "params.inputId", 128), entryId: string(value.entryId, "params.entryId", 128), deliveredAt,
+    ...afterFrame(value) };
+}
+// The number of session events published before a receipt; it is applied after those.
+function afterFrame(value) {
+  return value.afterFrame === undefined ? {} : { afterFrame: integer(value.afterFrame, "params.afterFrame", 0, Number.MAX_SAFE_INTEGER) };
 }
 function dialogResponse(params) {
   const { value, sessionId } = sessionIdParam(params, ["uiRequestId", "value", "confirmed", "cancelled"]);
@@ -441,7 +446,7 @@ const validators = new Map([
   ["set_skill_manifest", (p) => { const value = record(p, "params"); exact(value, new Set(["skills"]), "params"); return { skills: array(value.skills, "params.skills", 128).map((item, index) => skill(item, `params.skills[${index}]`)) }; }],
   ["record_usage", usage], ["record_context_usage", contextUsage], ["get_usage", usageWindow], ["send_message", sendMessage], ["session_history", sessionHistory], ["cron_job", cronJob],
   ["get_actor_input", actorInputId], ["accept_actor_input", actorInputId], ["record_input_delivery", actorInputDelivery], ["flush_actor_inputs", empty],
-  ["ack_message", (p) => { const value = record(p, "params"); exact(value, new Set(["messageId"]), "params"); return { messageId: string(value.messageId, "params.messageId", 128) }; }],
+  ["ack_message", (p) => { const value = record(p, "params"); exact(value, new Set(["messageId", "afterFrame"]), "params"); return { messageId: string(value.messageId, "params.messageId", 128), ...afterFrame(value) }; }],
   ["spawn_child", spawnChild], ["get_child", childSelector], ["stop_child", childSelector], ["revive_child", childSelector], ["delete_child", childSelector],
   ["create_root", createRoot], ["rename_session", renameSession], ["subscribe_session", subscribe], ["subscribe_root_output", subscribeRootOutput], ["unsubscribe_root_output", empty],
   ["unsubscribe_session", (p) => sessionIdParam(p)], ["submit_input", submit], ["respond_dialog", dialogResponse],

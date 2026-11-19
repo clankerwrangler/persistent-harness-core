@@ -282,5 +282,9 @@
   "VisibleOutputImagesTrustCallerMetadata.cfg": "violation",
   "WorkerResultWire.cfg": "pass",
   "WorkerResultWire.leak.cfg": "violation",
-  "WorkerResultWire.mutateCanonical.cfg": "violation"
+  "WorkerResultWire.mutateCanonical.cfg": "violation",
+  "RootIdleReport.cfg": "pass",
+  "RootIdleReport.AckEnds.cfg": "violation",
+  "RootIdleReport.NoCover.cfg": "violation",
+  "RootIdleReport.NoDefer.cfg": "violation"
 }
