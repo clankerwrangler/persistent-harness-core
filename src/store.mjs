@@ -1,353 +1,47 @@
 import { createHash, randomUUID } from "node:crypto";
 import { normalizeInputLocation } from "./input-location.mjs";
 import { actorInputDigest, normalizeTurnFailure } from "./protocol.mjs";
+import {
+  MAX_NAVIGATOR_ANCESTOR_DEPTH,
+  activityRank,
+  mapActorInput,
+  mapActorInputReceipt,
+  mapMessage,
+  mapSession,
+  mapTask,
+  normalizeInputProvenance,
+  normalizeRetryIntent,
+  parseJson,
+  relationshipBetween,
+  resolveFastModePreference,
+  turnFailureBoundary,
+} from "./store-mappers.mjs";
+import { SCHEMA_VERSION, migrateHarnessDatabase } from "./store-schema.mjs";
+import { HarnessUsageStore } from "./store-usage.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { allocateUniqueRootName, defaultRootName, shortSessionId } from "./root-title.mjs";
 
-export const SCHEMA_VERSION = 2;
+export { SCHEMA_VERSION };
 export const GLOBAL_ROOT_FAMILY_ID = "local-roots";
 export const MAX_PENDING_INPUT_BYTES_PER_SESSION = 16 * 1024 * 1024;
 export const MAX_PENDING_INPUT_BYTES_GLOBAL = 64 * 1024 * 1024;
 export const MAX_NAVIGATOR_SESSIONS = 512;
-const MAX_NAVIGATOR_ANCESTOR_DEPTH = 64;
-
-function parseJson(value, fallback = null) {
-  if (typeof value !== "string") return fallback;
-  try { return JSON.parse(value); } catch { return fallback; }
-}
-
-// Resolve only actual parent edges. Shared family labels are not root identities.
-// The bound matches the navigator's ancestor snapshot; partial ancestry is unknown.
-function resolveFastModePreference(sessionId, readRow) {
-  const unknown = { fastMode: null, fastModeRootSessionId: null };
-  const seen = new Set();
-  let id = sessionId, expectedDepth = null;
-  for (let hops = 0; hops <= MAX_NAVIGATOR_ANCESTOR_DEPTH; hops += 1) {
-    if (seen.has(id)) return unknown;
-    seen.add(id);
-    const row = readRow(id);
-    if (!row || row.id !== id || row.lifecycle === "deleted" || !Number.isSafeInteger(row.depth)
-      || row.depth < 0 || row.depth > MAX_NAVIGATOR_ANCESTOR_DEPTH
-      || (expectedDepth !== null && row.depth !== expectedDepth)) return unknown;
-    if (row.kind === "root") {
-      if (row.depth !== 0 || row.parent_session_id !== null) return unknown;
-      const launch = parseJson(row.launch_json);
-      let fastMode = null;
-      if (launch !== null && typeof launch === "object" && !Array.isArray(launch)) {
-        // Retained pre-feature roots default off without rewriting their launch state.
-        if (!Object.hasOwn(launch, "fastMode")) fastMode = false;
-        else if (typeof launch.fastMode === "boolean") fastMode = launch.fastMode;
-      }
-      return { fastMode, fastModeRootSessionId: row.id };
-    }
-    if (row.kind !== "child" || row.depth === 0 || typeof row.parent_session_id !== "string" || !row.parent_session_id) return unknown;
-    expectedDepth = row.depth - 1;
-    id = row.parent_session_id;
-  }
-  return unknown;
-}
-
-function publicLaunch(value, preference) {
-  const launch = typeof value === "string" ? parseJson(value) : value;
-  if (!launch) return null;
-  return {
-    model: launch.model,
-    thinking: launch.thinking,
-    pendingInference: launch.pendingInference ?? null,
-    ...preference,
-    fastModeSupported: typeof launch.fastModeSupported === "boolean" ? launch.fastModeSupported : null,
-    ...(launch.contextFork ? { contextFork: launch.contextFork } : {}),
-    capabilityIds: Array.isArray(launch.capabilities) ? launch.capabilities.map((item) => item.id) : [],
-  };
-}
-
-function turnFailureBoundary(turnFailure) {
-  return turnFailure.dispatchBoundary === "before_provider_dispatch"
-    ? "This turn stopped before provider dispatch. Local input or extension effects may already be committed."
-    : turnFailure.dispatchBoundary === "tool_effects_possible"
-      ? "Tool execution was admitted or started in this turn; external effects may already have occurred. Completion is unknown."
-      : "Provider dispatch was attempted in this turn; completion and external effects are unknown.";
-}
-
-function mapSession(row, preference) {
-  if (!row) return undefined;
-  return {
-    sessionId: row.id,
-    shortId: row.short_id,
-    sessionFile: row.session_file,
-    cwd: row.cwd,
-    repositoryRoot: row.repository_root,
-    name: row.display_name,
-    kind: row.kind,
-    familyId: row.family_id,
-    parentSessionId: row.parent_session_id,
-    depth: Number(row.depth),
-    activity: row.activity,
-    lifecycle: row.lifecycle,
-    actorGeneration: Number(row.actor_generation),
-    actorPid: row.actor_pid == null ? null : Number(row.actor_pid),
-    actorIdentity: parseJson(row.actor_identity_json),
-    quietSince: row.quiet_since,
-    lastError: row.last_error,
-    launch: publicLaunch(row.launch_json, preference),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    lastActivityAt: row.last_activity_at ?? row.created_at,
-    startedAt: row.started_at,
-    stoppedAt: row.stopped_at,
-    workingDescendantCount: Number(row.working_descendant_count ?? 0),
-  };
-}
-
-function mapMessage(row) {
-  if (!row) return undefined;
-  return {
-    messageId: row.id,
-    senderId: row.sender_id,
-    targetId: row.target_id,
-    relationship: row.relationship,
-    deliveryMode: row.delivery_mode,
-    body: row.body,
-    state: row.state,
-    attemptCount: Number(row.attempt_count),
-    acceptedAt: row.accepted_at,
-    queuedAt: row.queued_at,
-    deliveredAt: row.delivered_at,
-    acknowledgedAt: row.acknowledged_at,
-    lastError: row.last_error ?? null,
-    senderEntryId: row.sender_entry_id ?? null,
-    ...(row.child_exit_generation != null ? { childExitGeneration: Number(row.child_exit_generation) } : {}),
-  };
-}
-
-function normalizeInputProvenance(source, origin) {
-  if (!["user", "cron", "background"].includes(source)) throw new Error("input source must be user, cron, or background");
-  if (source === "user") {
-    if (origin !== null) throw new Error("user input must not carry an internal origin");
-    return { originJson: null };
-  }
-  const fields = source === "cron" ? ["jobId", "runId"] : ["jobId"];
-  if (!origin || typeof origin !== "object" || Array.isArray(origin)
-    || Object.keys(origin).some((key) => !fields.includes(key))
-    || fields.some((key) => typeof origin[key] !== "string" || !origin[key].length || origin[key].length > 128)) {
-    throw new Error("internal input requires an authenticated job origin");
-  }
-  return { originJson: JSON.stringify(Object.fromEntries(fields.map((key) => [key, origin[key]]))) };
-}
-
-function normalizeRetryIntent(value) {
-  if (value === null) return null;
-  if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).some((key) => !["targetId", "mode"].includes(key))
-    || typeof value.targetId !== "string" || !value.targetId || value.targetId.length > 128
-    || /[\u0000-\u001f\u007f]/.test(value.targetId) || !["original", "explicit"].includes(value.mode)) {
-    throw new Error("retryIntent must contain a bounded targetId and original or explicit mode");
-  }
-  return JSON.stringify({ targetId: value.targetId, mode: value.mode });
-}
-
-function mapActorInputReceipt(row) {
-  const acceptedAt = Number(row.created_at), deliveredAt = row.delivered_at == null ? null : Number(row.delivered_at);
-  return { inputId: row.id, sessionId: row.session_id, sequence: Number(row.sequence),
-    createdAt: acceptedAt, acceptedAt, deliveredAt, entryId: row.delivered_entry_id ?? null,
-    outcome: row.handled_at == null ? "accepted" : "handled", handledAt: row.handled_at ?? null,
-    source: row.source ?? null, origin: parseJson(row.origin_json), retryIntent: parseJson(row.retry_intent_json),
-    ...(row.client_message_id === null ? {} : { clientMessageId: row.client_message_id }),
-    delivery: { state: deliveredAt === null ? "accepted" : "delivered", inputId: row.id,
-      acceptedAt: new Date(acceptedAt).toISOString(), deliveredAt: deliveredAt === null ? null : new Date(deliveredAt).toISOString() } };
-}
-
-function mapActorInput(receipt, pending, { includeDigest = false } = {}) {
-  const receiptValue = mapActorInputReceipt(receipt);
-  if (pending?.wake_error_generation != null && receiptValue.delivery.state === "accepted") receiptValue.delivery.retryableError = {
-    code: "actor_wake_failed", generation: Number(pending.wake_error_generation),
-    message: "Message saved. The agent could not receive it. Retry sending." };
-  return { ...receiptValue, ...(includeDigest ? { digest: receipt.digest } : {}), state: pending?.state ?? "completed",
-    transportAcceptedAt: pending?.accepted_at ?? null,
-    acceptedGeneration: pending?.accepted_generation == null ? null : Number(pending.accepted_generation),
-    ...(pending ? { message: pending.body, images: parseJson(pending.images_json, []), behavior: pending.behavior,
-      ...(pending.location_json == null ? {} : { location: normalizeInputLocation(JSON.parse(pending.location_json)) }) } : {}) };
-}
-
-function mapTask(row) {
-  if (!row) return undefined;
-  return {
-    taskId: row.id,
-    childId: row.child_id,
-    kind: row.kind,
-    prompt: row.prompt,
-    state: row.state,
-    createdAt: row.created_at,
-    submittedAt: row.submitted_at,
-    completedAt: row.completed_at,
-    error: row.error,
-    historyPeerName: row.history_peer_name ?? null,
-    historyEntryId: row.history_entry_id ?? null,
-  };
-}
-
-function relationshipBetween(sender, target) {
-  if (sender.id === target.id) return "self";
-  if (sender.parent_session_id === target.id) return "parent";
-  if (target.parent_session_id === sender.id) return "child";
-  if (sender.kind === "root" && target.kind === "root" && sender.family_id === target.family_id) return "sibling";
-  if (sender.parent_session_id && sender.parent_session_id === target.parent_session_id) return "sibling";
-  return undefined;
-}
-
-function activityRank(activity) {
-  return { working: 0, delegating: 1, idle: 2, inactive: 3 }[activity] ?? 4;
-}
-
-const CURRENT_SCHEMA = `
-  CREATE TABLE sessions (
-    id TEXT PRIMARY KEY,
-    short_id TEXT NOT NULL UNIQUE,
-    session_file TEXT,
-    cwd TEXT NOT NULL,
-    repository_root TEXT,
-    display_name TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('root', 'child')),
-    family_id TEXT NOT NULL,
-    parent_session_id TEXT REFERENCES sessions(id),
-    depth INTEGER NOT NULL CHECK (depth >= 0),
-    activity TEXT NOT NULL CHECK (activity IN ('working', 'delegating', 'idle', 'inactive')),
-    streaming INTEGER NOT NULL DEFAULT 0 CHECK (streaming IN (0, 1)),
-    lifecycle TEXT NOT NULL CHECK (lifecycle IN ('starting', 'resident', 'passivated', 'stopped', 'error', 'deleted')),
-    actor_token TEXT NOT NULL,
-    actor_generation INTEGER NOT NULL CHECK (actor_generation >= 1),
-    actor_pid INTEGER,
-    actor_identity_json TEXT,
-    launch_json TEXT,
-    scratch_json TEXT,
-    quiet_since INTEGER,
-    last_error TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    last_activity_at INTEGER,
-    started_at INTEGER,
-    stopped_at INTEGER,
-    deleted_at INTEGER
-  ) STRICT;
-  CREATE UNIQUE INDEX root_name ON sessions(display_name) WHERE kind = 'root' AND lifecycle <> 'deleted';
-  CREATE UNIQUE INDEX child_name_per_parent ON sessions(parent_session_id, display_name) WHERE kind = 'child' AND lifecycle <> 'deleted';
-  CREATE INDEX sessions_family ON sessions(family_id, kind, created_at);
-  CREATE INDEX sessions_parent ON sessions(parent_session_id, lifecycle, id);
-  CREATE INDEX sessions_lifecycle ON sessions(lifecycle, quiet_since, created_at, id);
-  CREATE INDEX sessions_pending_scratch ON sessions(lifecycle, id) WHERE kind = 'root' AND lifecycle = 'deleted' AND CASE WHEN json_valid(scratch_json) THEN json_extract(scratch_json, '$.state') END = 'deleting';
-  CREATE TABLE children (
-    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE
-  ) STRICT;
-  CREATE TABLE child_tasks (
-    id TEXT PRIMARY KEY,
-    child_id TEXT NOT NULL REFERENCES children(session_id) ON DELETE CASCADE,
-    kind TEXT NOT NULL CHECK (kind IN ('initial')),
-    prompt TEXT,
-    state TEXT NOT NULL CHECK (state IN ('queued', 'submitted', 'completed', 'failed')),
-    created_at INTEGER NOT NULL,
-    submitted_at INTEGER,
-    completed_at INTEGER,
-    error TEXT,
-    history_peer_name TEXT NOT NULL,
-    history_entry_id TEXT
-  ) STRICT;
-  CREATE INDEX child_tasks_pending ON child_tasks(child_id, created_at, id) WHERE state IN ('queued', 'submitted');
-  CREATE INDEX child_tasks_history_pending ON child_tasks(child_id, created_at, id) WHERE history_entry_id IS NULL;
-  CREATE UNIQUE INDEX child_tasks_history_entries ON child_tasks(history_entry_id) WHERE history_entry_id IS NOT NULL;
-  CREATE TABLE actor_inputs (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    body TEXT NOT NULL,
-    images_json TEXT NOT NULL DEFAULT '[]',
-    location_json TEXT,
-    digest TEXT NOT NULL,
-    behavior TEXT NOT NULL CHECK (behavior IN ('auto', 'steer', 'follow_up')),
-    state TEXT NOT NULL CHECK (state IN ('queued', 'accepted')),
-    created_at INTEGER NOT NULL,
-    accepted_at INTEGER,
-    accepted_generation INTEGER,
-    wake_error_generation INTEGER
-  ) STRICT;
-  CREATE INDEX actor_inputs_pending ON actor_inputs(session_id, created_at, id);
-  CREATE TABLE actor_input_receipts (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    digest TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    sequence INTEGER NOT NULL UNIQUE,
-    source TEXT CHECK (source IN ('user', 'cron', 'background')),
-    origin_json TEXT,
-    client_message_id TEXT,
-    delivered_at INTEGER,
-    delivered_entry_id TEXT,
-    handled_at INTEGER,
-    retry_intent_json TEXT
-  ) STRICT;
-  CREATE INDEX actor_input_receipts_session ON actor_input_receipts(session_id, created_at, id);
-  CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    sender_id TEXT NOT NULL REFERENCES sessions(id),
-    target_id TEXT NOT NULL REFERENCES sessions(id),
-    relationship TEXT NOT NULL CHECK (relationship IN ('parent', 'child', 'sibling')),
-    delivery_mode TEXT NOT NULL CHECK (delivery_mode IN ('auto', 'follow_up')),
-    body TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('accepted', 'queued', 'delivered', 'acknowledged', 'rejected')),
-    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
-    accepted_at INTEGER NOT NULL,
-    queued_at INTEGER,
-    delivered_at INTEGER,
-    acknowledged_at INTEGER,
-    last_error TEXT,
-    sender_entry_id TEXT,
-    child_exit_generation INTEGER
-  ) STRICT;
-  CREATE INDEX pending_messages_target ON messages(target_id, accepted_at, id) WHERE state IN ('queued', 'delivered');
-  CREATE UNIQUE INDEX message_sender_entries ON messages(sender_id, sender_entry_id) WHERE sender_entry_id IS NOT NULL;
-  CREATE INDEX pending_child_exit_messages ON messages(id) WHERE child_exit_generation IS NOT NULL AND state IN ('queued', 'delivered');
-  CREATE TABLE session_skill_grants (
-    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-    manifest_json TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
-  ) STRICT;
-  CREATE TABLE usage_entries (
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    entry_id TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    model TEXT NOT NULL,
-    input_tokens INTEGER NOT NULL CHECK (input_tokens >= 0),
-    output_tokens INTEGER NOT NULL CHECK (output_tokens >= 0),
-    cache_read_tokens INTEGER NOT NULL CHECK (cache_read_tokens >= 0),
-    cache_write_tokens INTEGER NOT NULL CHECK (cache_write_tokens >= 0),
-    reasoning_tokens INTEGER CHECK (reasoning_tokens IS NULL OR reasoning_tokens >= 0),
-    total_tokens INTEGER NOT NULL CHECK (total_tokens >= 0),
-    cost_total REAL NOT NULL CHECK (cost_total >= 0),
-    recorded_at INTEGER NOT NULL,
-    PRIMARY KEY (session_id, entry_id)
-  ) STRICT;
-  CREATE INDEX usage_entries_recorded ON usage_entries(recorded_at, session_id, entry_id);
-  CREATE TABLE session_context_usage (
-    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-    context_tokens INTEGER CHECK (context_tokens IS NULL OR context_tokens >= 0),
-    context_window INTEGER NOT NULL CHECK (context_window > 0),
-    percent REAL CHECK (percent IS NULL OR (percent >= 0 AND percent <= 10000)),
-    updated_at INTEGER NOT NULL
-  ) STRICT;
-`;
 
 export class HarnessStore {
   #db;
   // The root that hears about other roots' abnormal exits and turns (Home), or null.
   rootFailureObserver = () => null;
   #deletingSessions = new Set();
-  #usageSummary = null;
+  #usage;
 
   constructor(databasePath, { readOnly = false } = {}) {
     this.#db = new DatabaseSync(databasePath, { readOnly });
     this.#db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA cache_size = -16384;");
+    this.#usage = new HarnessUsageStore(this.#db, (sessionId) => Boolean(this.#sessionRow(sessionId)));
     // Native read-only connections can still create local WAL coordination sidecars.
     if (readOnly) return;
     if (databasePath !== ":memory:") this.#db.exec("PRAGMA journal_mode = WAL;");
-    this.#migrate();
+    migrateHarnessDatabase(this.#db);
   }
 
   get database() { return this.#db; }
@@ -377,98 +71,6 @@ export class HarnessStore {
     this.#db.prepare(`UPDATE child_tasks SET state = 'failed', completed_at = coalesce(completed_at, ?), error = ?
       WHERE state IN ('queued', 'submitted') AND child_id IN (${deleted})`)
       .run(now, "child session was deleted before its task completed");
-  }
-
-  #migrate() {
-    const version = Number(this.#db.prepare("PRAGMA user_version").get().user_version);
-    if (version !== 0 && version !== 1 && version !== SCHEMA_VERSION) {
-      throw new Error(`unreleased database schema ${version} is unsupported; recreate the harness database`);
-    }
-    if (version === 0) {
-      this.#db.exec(`BEGIN IMMEDIATE; ${CURRENT_SCHEMA} PRAGMA user_version = ${SCHEMA_VERSION}; COMMIT;`);
-      return;
-    }
-    const sessionColumns = new Set(this.#db.prepare("PRAGMA table_info(sessions)").all().map((row) => row.name));
-    const inputTable = this.#db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'actor_inputs'").get();
-    if (!sessionColumns.has("actor_token") || !sessionColumns.has("actor_generation") || !inputTable) {
-      throw new Error("unreleased split-architecture database is unsupported; preserve session files, then recreate harness.sqlite");
-    }
-    if (!sessionColumns.has("scratch_json")) this.#db.exec("ALTER TABLE sessions ADD COLUMN scratch_json TEXT");
-    // Full parent edges serve active counts and deletion through tombstones.
-    this.#db.exec("CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_session_id, lifecycle, id)");
-    if (sessionColumns.has("kind") && sessionColumns.has("lifecycle")) {
-      this.#db.exec(`CREATE INDEX IF NOT EXISTS sessions_pending_scratch ON sessions(lifecycle, id)
-        WHERE kind = 'root' AND lifecycle = 'deleted'
-          AND CASE WHEN json_valid(scratch_json) THEN json_extract(scratch_json, '$.state') END = 'deleting'`);
-    }
-    let inputColumns = new Set(this.#db.prepare("PRAGMA table_info(actor_inputs)").all().map((row) => row.name));
-    if (!inputColumns.has("wake_error_generation")) this.#db.exec("ALTER TABLE actor_inputs ADD COLUMN wake_error_generation INTEGER");
-    if (!inputColumns.has("location_json")) this.#db.exec("ALTER TABLE actor_inputs ADD COLUMN location_json TEXT");
-    if (!inputColumns.has("images_json")) this.#db.exec("ALTER TABLE actor_inputs ADD COLUMN images_json TEXT NOT NULL DEFAULT '[]'");
-    inputColumns = new Set(this.#db.prepare("PRAGMA table_info(actor_inputs)").all().map((row) => row.name));
-    if (!inputColumns.has("digest")) this.#db.exec("ALTER TABLE actor_inputs ADD COLUMN digest TEXT");
-    this.#db.exec(`CREATE TABLE IF NOT EXISTS actor_input_receipts (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      digest TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    ) STRICT; CREATE INDEX IF NOT EXISTS actor_input_receipts_session ON actor_input_receipts(session_id, created_at, id);`);
-    const updateDigest = this.#db.prepare("UPDATE actor_inputs SET digest = ? WHERE id = ?");
-    const insertReceipt = this.#db.prepare("INSERT OR IGNORE INTO actor_input_receipts(id, session_id, digest, created_at) VALUES (?, ?, ?, ?)");
-    for (const row of this.#db.prepare("SELECT * FROM actor_inputs WHERE digest IS NULL").all()) {
-      const digest = actorInputDigest(row.body, row.images_json, row.behavior); updateDigest.run(digest, row.id);
-    }
-    for (const row of this.#db.prepare("SELECT * FROM actor_inputs WHERE id NOT IN (SELECT id FROM actor_input_receipts)").all()) {
-      insertReceipt.run(row.id, row.session_id, row.digest, row.created_at);
-    }
-    // Preserve legacy receipt order without guessing provenance or delivery times.
-    const receiptColumns = new Set(this.#db.prepare("PRAGMA table_info(actor_input_receipts)").all().map((row) => row.name));
-    this.#db.exec("BEGIN IMMEDIATE");
-    try {
-      for (const [name, type] of [["sequence", "INTEGER"], ["source", "TEXT"], ["origin_json", "TEXT"],
-        ["client_message_id", "TEXT"], ["delivered_at", "INTEGER"], ["delivered_entry_id", "TEXT"], ["handled_at", "INTEGER"], ["retry_intent_json", "TEXT"]]) {
-        if (!receiptColumns.has(name)) this.#db.exec(`ALTER TABLE actor_input_receipts ADD COLUMN ${name} ${type}`);
-      }
-      this.#db.exec("UPDATE actor_input_receipts SET sequence = rowid WHERE sequence IS NULL");
-      this.#db.exec("CREATE UNIQUE INDEX IF NOT EXISTS actor_input_receipts_sequence ON actor_input_receipts(sequence)");
-      if (!sessionColumns.has("last_activity_at")) this.#db.exec("ALTER TABLE sessions ADD COLUMN last_activity_at INTEGER");
-      if (sessionColumns.has("created_at")) this.#db.exec("UPDATE sessions SET last_activity_at = created_at WHERE last_activity_at IS NULL");
-      this.#db.exec("COMMIT");
-    } catch (error) { this.#db.exec("ROLLBACK"); throw error; }
-    const messageColumns = new Set(this.#db.prepare("PRAGMA table_info(messages)").all().map((row) => row.name));
-    if (!messageColumns.has("sender_entry_id")) this.#db.exec("ALTER TABLE messages ADD COLUMN sender_entry_id TEXT");
-    if (!messageColumns.has("child_exit_generation")) this.#db.exec("ALTER TABLE messages ADD COLUMN child_exit_generation INTEGER");
-    this.#db.exec("CREATE INDEX IF NOT EXISTS pending_child_exit_messages ON messages(id) WHERE child_exit_generation IS NOT NULL AND state IN ('queued', 'delivered')");
-    this.#db.exec("CREATE INDEX IF NOT EXISTS waiting_messages_target ON messages(target_id, accepted_at, id) WHERE state IN ('accepted', 'queued', 'delivered')");
-    this.#db.exec("CREATE UNIQUE INDEX IF NOT EXISTS message_sender_entries ON messages(sender_id, sender_entry_id) WHERE sender_entry_id IS NOT NULL");
-    this.#db.exec(`CREATE TABLE IF NOT EXISTS session_context_usage (
-      session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-      context_tokens INTEGER CHECK (context_tokens IS NULL OR context_tokens >= 0),
-      context_window INTEGER NOT NULL CHECK (context_window > 0),
-      percent REAL CHECK (percent IS NULL OR (percent >= 0 AND percent <= 10000)),
-      updated_at INTEGER NOT NULL
-    ) STRICT`);
-    if (version === 1) {
-      this.#db.exec("BEGIN IMMEDIATE");
-      try {
-        const childTaskTable = this.#db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'child_tasks'").get();
-        if (childTaskTable) {
-          const childTaskColumns = new Set(this.#db.prepare("PRAGMA table_info(child_tasks)").all().map((row) => row.name));
-          if (!childTaskColumns.has("history_peer_name")) this.#db.exec("ALTER TABLE child_tasks ADD COLUMN history_peer_name TEXT");
-          if (!childTaskColumns.has("history_entry_id")) this.#db.exec("ALTER TABLE child_tasks ADD COLUMN history_entry_id TEXT");
-          // Legacy tasks predate child-creation history. Mark them with unique internal
-          // receipts so migration never creates retroactive end-of-transcript rows.
-          this.#db.exec(`UPDATE child_tasks SET history_peer_name = coalesce(history_peer_name,
-            (SELECT display_name FROM sessions WHERE sessions.id = child_tasks.child_id), 'legacy-child')
-            WHERE history_peer_name IS NULL`);
-          this.#db.exec("UPDATE child_tasks SET history_entry_id = 'legacy-child-history:' || id WHERE history_entry_id IS NULL");
-          this.#db.exec("CREATE INDEX IF NOT EXISTS child_tasks_history_pending ON child_tasks(child_id, created_at, id) WHERE history_entry_id IS NULL");
-          this.#db.exec("CREATE UNIQUE INDEX IF NOT EXISTS child_tasks_history_entries ON child_tasks(history_entry_id) WHERE history_entry_id IS NOT NULL");
-        }
-        this.#db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-        this.#db.exec("COMMIT");
-      } catch (error) { this.#db.exec("ROLLBACK"); throw error; }
-    }
   }
 
   getSessionRoot(sessionId) {
@@ -1369,180 +971,13 @@ export class HarnessStore {
     return { version: 1, skills: parseJson(row.manifest_json, []), updatedAt: row.updated_at };
   }
 
-  recordUsage(sessionId, usage, now = Date.now()) {
-    if (!this.#sessionRow(sessionId)) throw new Error("session does not exist");
-    const result = this.#db.prepare(`INSERT OR IGNORE INTO usage_entries (
-      session_id, entry_id, provider, model, input_tokens, output_tokens, cache_read_tokens,
-      cache_write_tokens, reasoning_tokens, total_tokens, cost_total, recorded_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(sessionId, usage.entryId, usage.provider, usage.model, usage.input, usage.output,
-        usage.cacheRead, usage.cacheWrite, usage.reasoning, usage.totalTokens, usage.costTotal, now);
-    if (result.changes === 1 && this.#usageSummary) this.#addUsage(usage);
-    return { recorded: result.changes === 1 };
-  }
-
-  recordContextUsage(sessionId, usage, now = Date.now()) {
-    if (!this.#sessionRow(sessionId)) throw new Error("session does not exist");
-    this.#db.prepare(`INSERT INTO session_context_usage(session_id, context_tokens, context_window, percent, updated_at)
-      VALUES (?, ?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET context_tokens = excluded.context_tokens,
-      context_window = excluded.context_window, percent = excluded.percent, updated_at = excluded.updated_at`)
-      .run(sessionId, usage.tokens, usage.contextWindow, usage.percent, now);
-    return { recorded: true };
-  }
-
-  getSessionTelemetry(sessionId) {
-    if (!this.#sessionRow(sessionId)) throw new Error("session does not exist");
-    const total = this.#db.prepare(`SELECT count(*) AS entries, coalesce(sum(input_tokens), 0) AS input_tokens,
-      coalesce(sum(output_tokens), 0) AS output_tokens, coalesce(sum(cache_read_tokens), 0) AS cache_read_tokens,
-      coalesce(sum(cache_write_tokens), 0) AS cache_write_tokens, coalesce(sum(reasoning_tokens), 0) AS reasoning_tokens,
-      coalesce(sum(total_tokens), 0) AS total_tokens
-      FROM usage_entries WHERE session_id = ?`).get(sessionId);
-    const latest = this.#db.prepare(`SELECT provider, model, input_tokens, output_tokens, cache_read_tokens,
-      cache_write_tokens, reasoning_tokens, total_tokens FROM usage_entries
-      WHERE session_id = ? ORDER BY recorded_at DESC, rowid DESC LIMIT 1`).get(sessionId);
-    const context = this.#db.prepare("SELECT context_tokens, context_window, percent FROM session_context_usage WHERE session_id = ?").get(sessionId);
-    const project = (row) => {
-      const input = Number(row.input_tokens), cacheRead = Number(row.cache_read_tokens), cacheWrite = Number(row.cache_write_tokens);
-      const denominator = input + cacheRead + cacheWrite;
-      return { input, output: Number(row.output_tokens), cacheRead, cacheWrite,
-        reasoning: Number(row.reasoning_tokens ?? 0), totalTokens: Number(row.total_tokens),
-        cacheHitRatio: denominator > 0 ? cacheRead / denominator : null };
-    };
-    return {
-      session: { entries: Number(total.entries), ...project(total) },
-      latestTurn: latest ? { provider: latest.provider, model: latest.model, ...project(latest) } : null,
-      context: context ? { tokens: context.context_tokens == null ? null : Number(context.context_tokens),
-        contextWindow: Number(context.context_window), percent: context.percent == null ? null : Number(context.percent) } : null,
-    };
-  }
-
-  getUsageSummary() {
-    // Lifetime totals are loaded once and kept current by recordUsage, so status
-    // polls do not rescan every usage entry (~0.5 s per poll at 321k entries).
-    this.#usageSummary ??= this.#loadUsageSummary();
-    const { totals, models } = this.#usageSummary;
-    const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-    const byModel = [...models.values()]
-      .sort((a, b) => b.totalTokens - a.totalTokens || order(a.provider, b.provider) || order(a.model, b.model))
-      .slice(0, 64).map((row) => ({ ...row }));
-    return { ...totals, byModel };
-  }
-
-  #loadUsageSummary() {
-    const total = this.#db.prepare(`SELECT count(*) AS entries, coalesce(sum(input_tokens), 0) AS input_tokens,
-      coalesce(sum(output_tokens), 0) AS output_tokens, coalesce(sum(cache_read_tokens), 0) AS cache_read_tokens,
-      coalesce(sum(cache_write_tokens), 0) AS cache_write_tokens, coalesce(sum(reasoning_tokens), 0) AS reasoning_tokens,
-      coalesce(sum(total_tokens), 0) AS total_tokens, coalesce(sum(cost_total), 0.0) AS cost_total FROM usage_entries`).get();
-    const models = new Map();
-    for (const row of this.#db.prepare(`SELECT provider, model, count(*) AS entries, sum(total_tokens) AS total_tokens,
-      sum(cost_total) AS cost_total FROM usage_entries GROUP BY provider, model`).all()) {
-      models.set(JSON.stringify([row.provider, row.model]), { provider: row.provider, model: row.model,
-        entries: Number(row.entries), totalTokens: Number(row.total_tokens), costTotal: Number(row.cost_total) });
-    }
-    return { models, totals: {
-      entries: Number(total.entries), inputTokens: Number(total.input_tokens), outputTokens: Number(total.output_tokens),
-      cacheReadTokens: Number(total.cache_read_tokens), cacheWriteTokens: Number(total.cache_write_tokens),
-      reasoningTokens: Number(total.reasoning_tokens), totalTokens: Number(total.total_tokens),
-      costTotal: Number(total.cost_total),
-    } };
-  }
-
-  #addUsage(usage) {
-    const value = (field) => Number(field ?? 0);
-    const { totals, models } = this.#usageSummary;
-    totals.entries += 1; totals.inputTokens += value(usage.input); totals.outputTokens += value(usage.output);
-    totals.cacheReadTokens += value(usage.cacheRead); totals.cacheWriteTokens += value(usage.cacheWrite);
-    totals.reasoningTokens += value(usage.reasoning); totals.totalTokens += value(usage.totalTokens);
-    totals.costTotal += value(usage.costTotal);
-    const key = JSON.stringify([usage.provider, usage.model]);
-    const row = models.get(key) ?? { provider: usage.provider, model: usage.model, entries: 0, totalTokens: 0, costTotal: 0 };
-    row.entries += 1; row.totalTokens += value(usage.totalTokens); row.costTotal += value(usage.costTotal);
-    models.set(key, row);
-  }
-
-  getUsageWindow(windowMinutes, observedAt = Date.now()) {
-    if (!Number.isInteger(windowMinutes) || windowMinutes < 1 || windowMinutes > 10_080) {
-      throw new Error("usage window must be an integer from 1 through 10080 minutes");
-    }
-    if (!Number.isSafeInteger(observedAt) || observedAt < 0) throw new Error("usage observation time must be a non-negative safe integer");
-    const since = observedAt - windowMinutes * 60_000;
-    // SQLite integer sum() throws once a valid sequence exceeds int64. total() accumulates
-    // non-negative values without that failure; project() then applies one finite JSON-safe
-    // precision boundary to every numeric total and reports each field that hit it.
-    const totals = `count(*) AS entries, count(DISTINCT session_id) AS sessions,
-      total(input_tokens) AS input_tokens, total(output_tokens) AS output_tokens,
-      total(cache_read_tokens) AS cache_read_tokens, total(cache_write_tokens) AS cache_write_tokens,
-      total(reasoning_tokens) AS reasoning_tokens, total(total_tokens) AS total_tokens,
-      total(cost_total) AS estimated_cost`;
-    const total = this.#db.prepare(`SELECT ${totals} FROM usage_entries WHERE recorded_at >= ? AND recorded_at <= ?`)
-      .get(since, observedAt);
-    const rows = this.#db.prepare(`SELECT provider, model, ${totals} FROM usage_entries
-      WHERE recorded_at >= ? AND recorded_at <= ? GROUP BY provider, model
-      ORDER BY total(total_tokens) DESC, provider, model LIMIT 65`).all(since, observedAt);
-    const numericFields = [
-      ["entries", "entries"], ["sessions", "sessions"], ["inputTokens", "input_tokens"],
-      ["outputTokens", "output_tokens"], ["cacheReadTokens", "cache_read_tokens"],
-      ["cacheWriteTokens", "cache_write_tokens"], ["reasoningTokens", "reasoning_tokens"],
-      ["totalTokens", "total_tokens"], ["estimatedCost", "estimated_cost"],
-    ];
-    const project = (row) => {
-      const result = {};
-      const saturated = {};
-      for (const [field, column] of numericFields) {
-        const value = Number(row[column]);
-        saturated[field] = !Number.isFinite(value) || value > Number.MAX_SAFE_INTEGER;
-        result[field] = saturated[field] ? Number.MAX_SAFE_INTEGER : value;
-      }
-      return { ...result, precision: { safeMaximum: Number.MAX_SAFE_INTEGER, saturated } };
-    };
-    return {
-      window: { minutes: windowMinutes, since, observedAt, boundaries: "inclusive" },
-      aggregate: project(total),
-      byModel: rows.slice(0, 64).map((row) => ({ provider: row.provider, model: row.model, ...project(row) })),
-      byModelTruncated: rows.length > 64,
-    };
-  }
-
-  getOperationalCounts() {
-    const sessions = Object.fromEntries(this.#db.prepare("SELECT kind || ':' || activity AS key, count(*) AS count FROM sessions WHERE lifecycle <> 'deleted' GROUP BY kind, activity")
-      .all().map((row) => [row.key, Number(row.count)]));
-    const actors = Object.fromEntries(this.#db.prepare("SELECT lifecycle AS key, count(*) AS count FROM sessions GROUP BY lifecycle")
-      .all().map((row) => [row.key, Number(row.count)]));
-    const children = Object.fromEntries(this.#db.prepare(`SELECT s.lifecycle AS key, count(*) AS count FROM children c
-      JOIN sessions s ON s.id = c.session_id GROUP BY s.lifecycle`).all().map((row) => [row.key, Number(row.count)]));
-    const messages = Object.fromEntries(this.#db.prepare("SELECT state AS key, count(*) AS count FROM messages GROUP BY state")
-      .all().map((row) => [row.key, Number(row.count)]));
-    const inputs = Object.fromEntries(this.#db.prepare("SELECT state AS key, count(*) AS count FROM actor_inputs GROUP BY state")
-      .all().map((row) => [row.key, Number(row.count)]));
-    const tasks = Object.fromEntries(this.#db.prepare("SELECT state AS key, count(*) AS count FROM child_tasks GROUP BY state")
-      .all().map((row) => [row.key, Number(row.count)]));
-    return { sessions, actors, children, messages, inputs, tasks };
-  }
-
-  diagnose() {
-    const issues = [];
-    for (const row of this.#db.prepare("SELECT * FROM sessions WHERE lifecycle <> 'deleted'").all()) {
-      if (!row.session_file) issues.push({ code: "missing_session_file", sessionId: row.id });
-      if (row.lifecycle === "resident" && row.actor_pid == null) issues.push({ code: "resident_without_pid", sessionId: row.id });
-      if (!row.actor_token) issues.push({ code: "missing_actor_token", sessionId: row.id });
-    }
-    for (const row of this.#db.prepare("PRAGMA foreign_key_check").all()) {
-      issues.push({ code: "foreign_key_violation", table: row.table, rowId: row.rowid });
-    }
-    for (const row of this.#db.prepare(`SELECT m.id, m.target_id FROM messages m JOIN sessions s ON s.id = m.target_id
-      WHERE s.lifecycle = 'deleted' AND m.state IN ('accepted', 'queued', 'delivered') LIMIT 256`).all()) {
-      issues.push({ code: "message_targets_deleted_session", messageId: row.id, sessionId: row.target_id });
-    }
-    for (const row of this.#db.prepare(`SELECT m.id, m.sender_id FROM messages m JOIN sessions s ON s.id = m.sender_id
-      WHERE s.lifecycle = 'deleted' AND m.state = 'accepted' LIMIT 256`).all()) {
-      issues.push({ code: "message_awaits_deleted_sender", messageId: row.id, sessionId: row.sender_id });
-    }
-    for (const row of this.#db.prepare(`SELECT t.id, t.child_id FROM child_tasks t JOIN sessions s ON s.id = t.child_id
-      WHERE s.lifecycle = 'deleted' AND t.state IN ('queued', 'submitted') LIMIT 256`).all()) {
-      issues.push({ code: "task_targets_deleted_child", taskId: row.id, sessionId: row.child_id });
-    }
-    return issues.slice(0, 256);
-  }
+  recordUsage(sessionId, usage, now = Date.now()) { return this.#usage.recordUsage(sessionId, usage, now); }
+  recordContextUsage(sessionId, usage, now = Date.now()) { return this.#usage.recordContextUsage(sessionId, usage, now); }
+  getSessionTelemetry(sessionId) { return this.#usage.getSessionTelemetry(sessionId); }
+  getUsageSummary() { return this.#usage.getUsageSummary(); }
+  getUsageWindow(windowMinutes, observedAt = Date.now()) { return this.#usage.getUsageWindow(windowMinutes, observedAt); }
+  getOperationalCounts() { return this.#usage.getOperationalCounts(); }
+  diagnose() { return this.#usage.diagnose(); }
 
   createActorInput(sessionId, { inputId = randomUUID(), message, images = [], location, behavior = "auto", source = "user",
     origin = null, clientMessageId = null, retryIntent = null, pendingLimit = 100, pendingBytesLimit = MAX_PENDING_INPUT_BYTES_PER_SESSION,

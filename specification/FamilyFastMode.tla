@@ -1,6 +1,7 @@
 ---------------------------- MODULE FamilyFastMode ----------------------------
 \* Sources:
 \*   src/store.mjs
+\*   src/store-mappers.mjs
 \*   src/model-capabilities.mjs
 \*   src/core-worker.mjs
 
