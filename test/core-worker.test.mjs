@@ -158,3 +158,64 @@ test("a model change during a turn waits for the session to settle, then is repo
   assert.deepEqual(applied.map((f) => [f.requestId, f.selection.model, f.selection.contextWindow]), [["r2", "b", 2000]]);
   await worker.close();
 });
+
+test("input reporting reads incrementally from the last reported entry and retries failed receipts without skipping", async (t) => {
+  const historyCalls = [], reported = [];
+  let failOnce = true;
+  t.mock.method(HarnessClient.prototype, "start", async () => ({ session: { depth: 0 }, scratch: { directory: os.tmpdir(), rootSessionId: "root" } }));
+  t.mock.method(HarnessClient.prototype, "stop", async () => {});
+  t.mock.getter(HarnessClient.prototype, "isConnected", () => true);
+  t.mock.method(HarnessClient.prototype, "request", async (type, params) => {
+    if (type === "record_input_delivery") {
+      if (params.inputId === "in-4" && failOnce) { failOnce = false; throw new Error("transient"); }
+      reported.push(params.inputId);
+    }
+    return { recorded: true };
+  });
+  const history = [userEntry("1", "old-1"), userEntry("2", "old-2")];
+  const core = Object.assign(fakeCore(history), {
+    history: async (options = {}) => {
+      historyCalls.push(options);
+      const from = options?.from ?? 0;
+      return structuredClone(history.filter((e) => Number(e.id) >= from));
+    },
+    addContext: async () => history.length + 1,
+  });
+  const worker = new CoreWorker({ core, options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
+    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish() {}, agentDir: os.tmpdir() });
+  await worker.start();
+  historyCalls.length = 0;
+
+  history.push(userEntry("3", "in-3"));
+  core.emit("event", { ev: "turn_start" });
+  for (let i = 0; i < 40 && reported.length < 1; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(historyCalls, [{ from: 3 }]);
+  assert.deepEqual(reported, ["in-3"]);
+
+  // Entry 4 fails once, entry 5 succeeds: cursor must stay before 4 so 4 is retried without double-reporting 5.
+  history.push(userEntry("4", "in-4"), userEntry("5", "in-5"));
+  core.emit("event", { ev: "settled", through: null });
+  for (let i = 0; i < 40 && !reported.includes("in-5"); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(historyCalls.at(-1), { from: 4 });
+  assert.deepEqual(reported, ["in-3", "in-5"]);
+
+  core.emit("event", { ev: "turn_start" });
+  for (let i = 0; i < 40 && !reported.includes("in-4"); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(historyCalls.at(-1), { from: 4 });
+  assert.deepEqual(reported, ["in-3", "in-5", "in-4"]);
+
+  // Once caught up, the next turn asks only past entry 5.
+  core.emit("event", { ev: "settled", through: null });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(historyCalls.at(-1), { from: 6 });
+
+  // Incoming agent message records its history entry without re-reading core.history().
+  const readsBeforeMessage = historyCalls.length;
+  worker.client.emit("event", { event: "message_available", data: { message: {
+    messageId: "m-1", senderId: "parent", senderName: "Home", relationship: "parent", body: "ping",
+  } } });
+  await worker.historyTail;
+  assert.equal(historyCalls.length, readsBeforeMessage, "agent message history lookup should use startup cache");
+  await worker.close();
+});

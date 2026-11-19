@@ -42,6 +42,11 @@ const choice = (value, values, name) => {
   if (!values.includes(value)) throw new TypeError(`Invalid ${name}`);
   return value;
 };
+const entrySeq = (entry) => {
+  const n = Number(entry?.id);
+  return typeof entry?.id === "string" && Number.isSafeInteger(n) && n >= 0 && String(n) === entry.id ? n : null;
+};
+const recordCacheKey = (customType, key, value, direction) => JSON.stringify([customType, key, value, direction ?? null]);
 
 
 export function parseCoreWorkerArgs(argv) {
@@ -110,6 +115,10 @@ export class CoreWorker {
     this.deliveredIds = new Set();
     this.deliveringInputs = new Set();
     this.reportedInputs = new Set();
+    this.savedInputs = new Set();
+    this.inputCursor = null;
+    this.recordedEntries = new Map();
+    this.recordedEntriesLoaded = false;
     // Times added to what the model is sent: every incoming message, and a tool result
     // after a long quiet stretch (since the last time given, which start() restores).
     this.clock = new MessageClock();
@@ -182,9 +191,20 @@ export class CoreWorker {
     // Inputs already in history are the supervisor's to reconcile (it does so when this
     // worker starts); this worker reports only those it adds from now on.
     for (const entry of entries) {
+      const n = entrySeq(entry);
+      if (n !== null && (this.inputCursor === null || n > this.inputCursor)) this.inputCursor = n;
       const inputId = inputIdForEntry(entry);
-      if (typeof inputId === "string" && inputId) this.reportedInputs.add(inputId);
+      if (typeof inputId === "string" && inputId) { this.reportedInputs.add(inputId); this.savedInputs.add(inputId); }
+      if (entry.type === "custom" && entry.customType === AGENT_MESSAGE_ENTRY_TYPE && entry.data?.messageId !== undefined) {
+        this.recordedEntries.set(recordCacheKey(AGENT_MESSAGE_ENTRY_TYPE, "messageId", entry.data.messageId, entry.data.direction),
+          { id: entry.id, timestamp: entry.timestamp });
+      }
+      if (entry.type === "custom" && entry.customType === CHILD_CREATION_ENTRY_TYPE && entry.data?.childId !== undefined) {
+        this.recordedEntries.set(recordCacheKey(CHILD_CREATION_ENTRY_TYPE, "childId", entry.data.childId, undefined),
+          { id: entry.id, timestamp: entry.timestamp });
+      }
     }
+    this.recordedEntriesLoaded = true;
     // The tool-result quiet stretch counts from the last time given, saved or not yet.
     const stamped = entries.findLast((entry) => (entry.message?.content ?? entry.content ?? []).some?.((part) => part?.harness === "time"));
     const last = Date.parse(stamped?.timestamp);
@@ -331,7 +351,15 @@ export class CoreWorker {
     if (!input || input.inputId !== inputId || input.sessionId !== this.sessionId) throw new Error("input is not reserved for this actor");
     if (!["cron", "background"].includes(input.source)) throw new Error("custom input requires a verified internal source");
     if (input.state === "completed") return { delivered: true };
-    const saved = (await this.core.history()).some((entry) => inputIdForEntry(entry) === inputId);
+    let saved = this.savedInputs.has(inputId);
+    if (!saved) {
+      const entries = await this.core.history(this.inputCursor === null ? {} : { from: this.inputCursor + 1 });
+      for (const entry of entries) {
+        const seen = inputIdForEntry(entry);
+        if (typeof seen === "string" && seen) this.savedInputs.add(seen);
+      }
+      saved = this.savedInputs.has(inputId);
+    }
     if (!saved && !this.deliveringInputs.has(inputId)) {
       this.deliveringInputs.add(inputId);
       const behavior = input.source === "background" ? "auto" : input.behavior;
@@ -369,13 +397,23 @@ export class CoreWorker {
 
   async #reportInputsOnce() {
     if (!this.client?.isConnected) return;
-    for (const entry of await this.core.history()) {
+    const entries = await this.core.history(this.inputCursor === null ? {} : { from: this.inputCursor + 1 });
+    let canAdvance = true;
+    for (const entry of entries) {
       const inputId = inputIdForEntry(entry);
-      if (typeof inputId !== "string" || !inputId || this.reportedInputs.has(inputId)) continue;
-      try {
-        await this.client.request("record_input_delivery", { inputId, entryId: entry.id, deliveredAt: entry.timestamp });
-        this.reportedInputs.add(inputId);
-      } catch { /* tried again at the next report */ }
+      if (typeof inputId === "string" && inputId) {
+        this.savedInputs.add(inputId);
+        if (!this.reportedInputs.has(inputId)) {
+          try {
+            await this.client.request("record_input_delivery", { inputId, entryId: entry.id, deliveredAt: entry.timestamp });
+            this.reportedInputs.add(inputId);
+          } catch { canAdvance = false; /* tried again at the next report */ }
+        }
+      }
+      if (canAdvance) {
+        const n = entrySeq(entry);
+        if (n !== null && (this.inputCursor === null || n > this.inputCursor)) this.inputCursor = n;
+      }
     }
   }
 
@@ -571,11 +609,20 @@ export class CoreWorker {
   // An agent message (to or from another session) or a child's creation, kept in history
   // once and reported to the supervisor with its entry id.
   async #recordOnce(customType, key, value, data, report) {
-    const existing = (await this.core.history()).find((entry) => entry.type === "custom" && entry.customType === customType
-      && entry.data?.[key] === value && (!data.direction || entry.data.direction === data.direction));
+    const cacheKey = recordCacheKey(customType, key, value, data.direction);
+    let existing = this.recordedEntries.get(cacheKey);
+    if (!existing && !this.recordedEntriesLoaded) {
+      const found = (await this.core.history()).find((entry) => entry.type === "custom" && entry.customType === customType
+        && entry.data?.[key] === value && (!data.direction || entry.data.direction === data.direction));
+      if (found) { existing = { id: found.id, timestamp: found.timestamp }; this.recordedEntries.set(cacheKey, existing); }
+    }
     let entryId, createdAt;
     if (existing) { entryId = existing.id; createdAt = existing.timestamp; }
-    else { entryId = String(await this.core.record(customType, data)); createdAt = new Date().toISOString(); }
+    else {
+      entryId = String(await this.core.record(customType, data));
+      createdAt = new Date().toISOString();
+      this.recordedEntries.set(cacheKey, { id: entryId, timestamp: createdAt });
+    }
     if (this.client?.isConnected) await this.client.request(report, { entryId, ...data, createdAt });
   }
 
