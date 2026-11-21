@@ -13,12 +13,14 @@ from typing import Any
 
 _execution_id = ContextVar("harness_execution_id", default=None)
 _control = None
+_control_thread = None
 _control_lock = threading.Lock()
 
 
 def configure_control(control) -> None:
-    global _control
+    global _control, _control_thread
     _control = control
+    _control_thread = threading.current_thread()
 
 
 def _send(frame: dict[str, Any]) -> None:
@@ -37,6 +39,9 @@ def _receive() -> dict[str, Any]:
 
 
 def host_request(request_type: str, payload: dict[str, Any]) -> Any:
+    # The nested reply wait shares its reader with the kernel command loop.
+    if _control_thread is not None and threading.current_thread() is not _control_thread:
+        raise RuntimeError("Python-backed skill host calls must run on the kernel cell thread. Call the skill directly in the cell.")
     request_id = str(uuid.uuid4())
     with _control_lock:
         _send({"type": "host_request", "id": request_id, "requestType": request_type, "payload": payload, "executionId": _execution_id.get()})

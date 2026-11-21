@@ -112,6 +112,62 @@ test("cells execute FIFO while the host remains responsive", { timeout: 180000 }
   assert.deepEqual(calls, ["A", "B"]);
 });
 
+test("host calls reject workers carrying an earlier cell's context without dispatching", { timeout: 180000 }, async (t) => {
+  const calls = [];
+  const { kernel } = await fixture(t, ({ name }) => {
+    calls.push(name);
+    return name;
+  });
+  try {
+    const first = await kernel.execute([
+      "import asyncio, os",
+      "from concurrent.futures import ThreadPoolExecutor",
+      "from contextvars import copy_context",
+      "from threading import Event",
+      "from _persistent_harness import _execution_id",
+      "kernel_pid = os.getpid()",
+      "cell_id = _execution_id.get()",
+      "release_worker = Event()",
+      "def submit_host_call():",
+      '    assert release_worker.wait(20), "worker was not released"',
+      "    assert cell_id is not None and _execution_id.get() == cell_id",
+      `    return ${gateCode("off-thread")}`,
+      "executor = ThreadPoolExecutor(max_workers=1)",
+      "worker_call = executor.submit(copy_context().run, submit_host_call)",
+      "async def on_cell_thread():",
+      "    await asyncio.sleep(0)",
+      `    return ${gateCode("on-thread async")}`,
+      "await on_cell_thread()",
+    ].join("\n"));
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.equal(first.mime["text/plain"], "'on-thread async'");
+    assert.deepEqual(calls, ["on-thread async"]);
+
+    // Only this later cell lets the worker use the first cell's saved context.
+    const rejected = await kernel.execute([
+      "release_worker.set()",
+      "try:",
+      "    worker_call.result(timeout=5)",
+      "finally:",
+      "    executor.shutdown(wait=False, cancel_futures=True)",
+    ].join("\n"), { signal: AbortSignal.timeout(8_000) });
+    assert.deepEqual(calls, ["on-thread async"]);
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.errorType, "RuntimeError");
+    assert.match(rejected.error, /kernel cell thread/);
+
+    const next = await kernel.execute(`os.getpid() == kernel_pid, ${gateCode("next cell")}`,
+      { signal: AbortSignal.timeout(8_000) });
+    assert.equal(next.ok, true, JSON.stringify(next));
+    assert.equal(next.mime["text/plain"], "(True, 'next cell')");
+    assert.deepEqual(calls, ["on-thread async", "next cell"]);
+  } catch (error) {
+    // A regression can strand a worker in the control reader. Retire this test kernel.
+    kernel.terminateForRecovery();
+    throw error;
+  }
+});
+
 test("active abort and queued abort leave a usable ordinary kernel", { timeout: 180000 }, async (t) => {
   const started = deferred(); const release = deferred();
   t.after(() => release.resolve());
