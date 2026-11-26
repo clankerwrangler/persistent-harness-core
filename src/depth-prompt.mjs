@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 export const MAX_DEPTH_PROMPT_FILE_BYTES = 64 * 1024;
@@ -28,11 +28,29 @@ export function depthPromptPaths(contextFiles, depth) {
   return candidates;
 }
 
-export async function loadDepthPrompt(contextFiles, depth, { read = readFile } = {}) {
+// Each depth file may be accompanied by a folder of the same name with `.d` in place of
+// `.md` (AGENTS.depth-0.d/), whose Markdown files load after it in name order.
+async function depthFolderPaths(filePath, list) {
+  const folder = filePath.replace(/\.md$/i, ".d");
+  let names;
+  try {
+    names = await list(folder);
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return [];
+    throw new Error(`could not list depth-scoped instructions ${folder}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return names.filter((name) => /\.md$/i.test(name)).sort().map((name) => path.join(folder, name));
+}
+
+export async function loadDepthPrompt(contextFiles, depth, { read = readFile, list = readdir } = {}) {
   requireDepth(depth);
   const files = [];
   let totalBytes = 0;
+  const filePaths = [];
   for (const filePath of depthPromptPaths(contextFiles, depth)) {
+    filePaths.push(filePath, ...await depthFolderPaths(filePath, list));
+  }
+  for (const filePath of filePaths) {
     let content;
     try {
       content = await read(filePath, "utf8");

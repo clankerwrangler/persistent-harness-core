@@ -181,7 +181,7 @@ start slot. Readiness does not certify input consumption or recovery completion.
 Direct `PiSessionActor` callers that omit `startupTimeoutMs` inherit their
 `requestTimeoutMs` as the **total handshake budget**, not a fresh budget per step.
 
-Prompts use the generic roles `user` and `assistant`. Keep deployment identities and personal instructions in the AGENTS files the core reads, outside this checkout.
+Prompts use the generic roles `user` and `assistant`. Keep deployment identities and personal instructions in the AGENTS files the core reads, outside this checkout. Beside each, `AGENTS.depth-N.md` adds instructions for sessions at depth N only, followed by the Markdown files in `AGENTS.depth-N.d/` in name order.
 
 Presentation directives default to `harness.presentation.v1`. `PI_HARNESS_PRESENTATION_NAMESPACE` selects a deployment-specific namespace (lowercase letter followed by up to 31 lowercase letters, digits, or hyphens). Set it to the existing marker's prefix before upgrading an installation with a different marker. Use the same value in the supervisor and any client importing its presentation helpers, and keep the model's directive instructions consistent. This preserves existing transcript markers and client schemas without embedding an identity in the repository.
 

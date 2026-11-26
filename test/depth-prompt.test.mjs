@@ -42,6 +42,30 @@ test("depth-scoped instructions follow loaded AGENTS context order and exact dep
   assert.equal((await loadDepthPrompt(contextFiles, 2)).prompt, "");
 });
 
+test("a depth folder loads its Markdown files after the depth file in name order", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "harness-depth-folder-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const globalContext = path.join(root, "AGENTS.md");
+  await writeFile(globalContext, "universal global");
+  await writeFile(path.join(root, "AGENTS.depth-0.md"), "ROOT FILE");
+  const folder = path.join(root, "AGENTS.depth-0.d");
+  await mkdir(folder);
+  await writeFile(path.join(folder, "flagship.md"), "FLAGSHIP");
+  await writeFile(path.join(folder, "persona.md"), "PERSONA");
+  await writeFile(path.join(folder, "notes.txt"), "IGNORED");
+  const rootPrompt = await loadDepthPrompt([globalContext], 0);
+  assert.deepEqual(rootPrompt.files.map((file) => path.relative(root, file.path)), [
+    "AGENTS.depth-0.md",
+    path.join("AGENTS.depth-0.d", "flagship.md"),
+    path.join("AGENTS.depth-0.d", "persona.md"),
+  ]);
+  assert.doesNotMatch(rootPrompt.prompt, /IGNORED/);
+  await rm(path.join(root, "AGENTS.depth-0.md"));
+  const folderOnly = await loadDepthPrompt([globalContext], 0);
+  assert.deepEqual(folderOnly.files.map((file) => file.content), ["FLAGSHIP", "PERSONA"]);
+  assert.equal((await loadDepthPrompt([globalContext], 1)).prompt, "");
+});
+
 test("depth-scoped instruction loading is bounded and rejects invalid depth", async () => {
   const contextFiles = ["/trusted/AGENTS.md"];
   await assert.rejects(
