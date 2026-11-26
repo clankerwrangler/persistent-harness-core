@@ -14,7 +14,8 @@ connection.execute("insert into state values (41)")
 connection_alias = connection
 sentinel = {"token":"persistent-state","values":[1,2,3]}
 sentinel_alias = sentinel
-native_buffer = mmap.mmap(-1, 32*1024*1024, flags=mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS,
+# 40 MiB, so the tests' 32 MiB paging bars do not depend on unrelated kernel memory.
+native_buffer = mmap.mmap(-1, 40*1024*1024, flags=mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS,
                           prot=mmap.PROT_READ|mmap.PROT_WRITE)
 buffer_alias = native_buffer
 for offset in range(0, len(native_buffer), 4096):

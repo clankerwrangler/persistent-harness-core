@@ -1007,7 +1007,12 @@ def restore_snapshot(snapshot_path, namespace, protected_names):
 
 sys.stdout = ProtocolStream(sys.stdout, "stdout")
 sys.stderr = ProtocolStream(sys.stderr, "stderr")
-shell = InteractiveShell.instance(display_pub_class=ProtocolDisplayPublisher, displayhook_class=ProtocolDisplayHook)
+# Session logs already keep every cell's code, so IPython keeps its history in memory only
+# instead of also writing it to ~/.ipython/profile_default/history.sqlite.
+from traitlets.config import Config
+_shell_config = Config()
+_shell_config.HistoryManager.enabled = False
+shell = InteractiveShell.instance(config=_shell_config, display_pub_class=ProtocolDisplayPublisher, displayhook_class=ProtocolDisplayHook)
 # stdin is /dev/null in this harness, so the default pager hits EOFError on
 # long skill?/pinfo output. Display pager content inline instead.
 shell.display_page = True
