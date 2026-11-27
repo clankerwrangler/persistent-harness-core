@@ -8,7 +8,7 @@
 // Missing the core or Python skips the groups that need them, with the reason, instead of failing.
 // bin/test-image.sh runs everything in an image that has both.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -66,12 +66,17 @@ if (missing.length) {
 }
 if (!files.length) { console.log("no test files to run"); process.exit(0); }
 
-const home = mkdtempSync(path.join(os.tmpdir(), "harness-tests-"));
+// Unix socket paths may not exceed 107 bytes, so tests get a short temporary root even when the
+// inherited one (a session scratch folder, say) is long.
+const tempRoot = os.tmpdir().length <= 32 ? os.tmpdir() : "/tmp";
+const home = mkdtempSync(path.join(tempRoot, "harness-tests-"));
+mkdirSync(path.join(home, "tmp"));
 const seedUsers = files.filter((name) => readFileSync(path.join(checkout, "test", name), "utf8").includes("HARNESS_TEST_MANAGED_SEED"));
 const managedSeed = seedUsers.length ? prepareManagedSeed(path.join(home, "managed-seed")) : null;
 const env = {
   ...process.env,
   HOME: path.join(home, "home"),
+  TMPDIR: path.join(home, "tmp"),
   HARNESS_DIR: path.join(home, "agent"),
   // Tests must never download a runtime as a side effect.
   HARNESS_AUTO_INSTALL: "0", UV_OFFLINE: "1",
