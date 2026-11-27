@@ -5,6 +5,16 @@ import net from "node:net";
 import { JsonLineDecoder, encodeFrame } from "./framing.mjs";
 import { PROTOCOL_VERSION, ProtocolError, validateServerFrame } from "./protocol.mjs";
 
+// Search/open have a 25s server budget plus a bounded transport margin. Child stop, delete and
+// revive wait for processes to shut down or start (a session's 3 s shutdown, its kernel's 1.5 s,
+// a 1 s termination grace), so they get the same budget; reporting a timeout for an action that
+// then succeeds made callers retry or misreport it. Everything else keeps the short timeout.
+const LONG_REQUESTS = new Set(["stop_child", "delete_child", "revive_child"]);
+export function requestTimeoutFor(type, params = {}, { requestTimeoutMs = 3000, historyRequestTimeoutMs = 28_000 } = {}) {
+  if (type === "session_history" && ["search", "open"].includes(params.operation)) return historyRequestTimeoutMs;
+  return LONG_REQUESTS.has(type) ? historyRequestTimeoutMs : requestTimeoutMs;
+}
+
 export class HarnessRequestError extends Error {
   constructor(code, message) { super(message); this.name = "HarnessRequestError"; this.code = code; }
 }
@@ -117,10 +127,7 @@ export class HarnessClient extends EventEmitter {
     const socket = this.#socket;
     if (!socket || socket.destroyed) return Promise.reject(new Error("harness is not connected"));
     const id = randomUUID();
-    // Search/open have a 25s server budget plus a bounded transport margin.
-    // Metadata list, registration, heartbeat, and all other RPCs retain 3s.
-    const timeoutMs = type === "session_history" && ["search", "open"].includes(params.operation)
-      ? this.historyRequestTimeoutMs : this.requestTimeoutMs;
+    const timeoutMs = requestTimeoutFor(type, params, this);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.#pending.delete(id); reject(new Error(`${type} request timed out`)); socket.destroy(); }, timeoutMs); timer.unref();
       this.#pending.set(id, { resolve, reject, timer });
