@@ -95,8 +95,26 @@ def _live_skill_proxy(alias: str) -> "SkillProxy":
         raise LookupError(f"skill {alias!r} is not loaded in this kernel") from None
 
 
+def _current_instructions(proxy) -> str:
+    """The skill's SKILL.md as it is now, so `skill?` shows edits made after the kernel started.
+    Falls back to the text loaded at startup when the file cannot be read."""
+    try:
+        with open(proxy.skill_path, "rb") as stream:
+            data = stream.read(_MAX_INSTRUCTIONS_BYTES + 1)
+        if len(data) <= _MAX_INSTRUCTIONS_BYTES:
+            return data.decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        pass
+    return proxy._instructions
+
+
+_MAX_INSTRUCTIONS_BYTES = 1024 * 1024
+
+
 class SkillProxy:
     """One SKILL.md object with optional Python backing."""
+
+    __doc__ = property(_current_instructions)
 
     def __init__(self, manifest: dict[str, Any], module=None):
         self.id = manifest["id"]
@@ -105,7 +123,7 @@ class SkillProxy:
         self.version = manifest["version"]
         self._module = module
         self._entry_point = manifest.get("python", {}).get("entryPoint") if manifest.get("python") else None
-        self.__doc__ = manifest["instructions"]
+        self._instructions = manifest["instructions"]
 
     @property
     def python_backed(self) -> bool:
