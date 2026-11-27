@@ -359,6 +359,28 @@ export async function discoverSkillsFromDirectory(directory) {
   }
 }
 
+// Several skill folders, as in HARNESS_SKILLS_PATH ("a:b"): each is discovered as one folder,
+// and a skill ID or Python alias may appear in only one of them.
+export function skillDirectories(skillsPath) {
+  return String(skillsPath).split(path.delimiter).filter(Boolean).map((directory) => path.resolve(directory));
+}
+
+export async function discoverSkillsFromDirectories(skillsPath) {
+  const catalogs = [];
+  for (const directory of skillDirectories(skillsPath)) catalogs.push(await discoverSkillsFromDirectory(directory));
+  const skills = catalogs.flatMap((catalog) => catalog.skills)
+    .sort((left, right) => left.id.localeCompare(right.id) || left.skillPath.localeCompare(right.skillPath));
+  const names = new Set();
+  const aliases = new Set();
+  for (const skill of skills) {
+    if (names.has(skill.id)) throw new Error(`duplicate skill ID across skill folders: ${skill.id}`);
+    if (aliases.has(skill.alias)) throw new Error(`duplicate skill Python alias across skill folders: ${skill.alias}`);
+    names.add(skill.id);
+    aliases.add(skill.alias);
+  }
+  return { skills, diagnostics: catalogs.flatMap((catalog) => catalog.diagnostics) };
+}
+
 export function skillCatalogForSkills(skills) {
   return skills.map((skill) => ({
     id: skill.id,

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PythonRuntimeManager } from "../src/python-runtime.mjs";
-import { discoverSkillsFromDirectory } from "../src/skills.mjs";
+import { discoverSkillsFromDirectories } from "../src/skills.mjs";
 
 const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const agentDir = process.env.HARNESS_DIR || path.join(os.homedir(), ".harness");
@@ -16,12 +16,12 @@ for (let index = 2; index < process.argv.length; index += 1) {
   else if (["--skills", "--runtime"].includes(argument)) {
     const value = process.argv[++index];
     if (!value) throw new Error(`${argument} requires a path`);
-    if (argument === "--skills") skillsPath = path.resolve(value);
+    if (argument === "--skills") skillsPath = value;
     else runtimeDir = path.resolve(value);
   } else throw new Error("usage: provision-skills.mjs [--yes] [--skills PATH] [--runtime PATH]");
 }
 
-const catalog = await discoverSkillsFromDirectory(skillsPath);
+const catalog = await discoverSkillsFromDirectories(skillsPath);
 if (catalog.diagnostics.length) throw new Error(`Invalid skill package:
 ${catalog.diagnostics.map((item) => item.error).join("\n")}`);
 const dependencies = [...new Set(catalog.skills.flatMap((skill) => skill.python?.dependencies ?? []))].sort();

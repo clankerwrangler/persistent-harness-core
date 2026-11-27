@@ -187,7 +187,7 @@ Presentation directives default to `harness.presentation.v1`. `HARNESS_PRESENTAT
 
 The default cron timezone is `UTC`. Set `HARNESS_CRON_TIMEZONE` to the deployment's intended timezone before upgrading if it previously relied on a local default. Existing jobs keep their stored timezone. Models come from the core's models file and provider sign-ins from the core; credentials are not stored in this checkout.
 
-`HARNESS_SKILLS_PATH` changes the complete catalog, not merely one prompt. Provision and validate its dependencies before starting workers. An explicit `HARNESS_PYTHON` bypasses managed provisioning and must already contain compatible IPython, dill, and skill dependencies.
+`HARNESS_SKILLS_PATH` changes the complete catalog, not merely one prompt. It may list several folders separated by `:`; each skill ID must appear in only one of them. Provision and validate its dependencies before starting workers. An explicit `HARNESS_PYTHON` bypasses managed provisioning and must already contain compatible IPython, dill, and skill dependencies.
 
 ## Develop and promote one source revision
 

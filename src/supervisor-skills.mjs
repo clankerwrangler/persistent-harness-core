@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { runtimeVersions } from "./python-runtime.mjs";
 import { sessionSidecarPaths } from "./session-paths.mjs";
-import { discoverSkills, discoverSkillsFromDirectory, materializeSkills, skillCatalogForSkills } from "./skills.mjs";
+import { discoverSkills, discoverSkillsFromDirectories, materializeSkills, skillCatalogForSkills } from "./skills.mjs";
 import { writeJsonAtomic } from "./supervisor-instance.mjs";
 import { requestFailure } from "./supervisor-transport.mjs";
 
@@ -56,7 +56,7 @@ export class SkillRuntimeCoordinator {
   }
 
   async #discoverSkillRuntimePlan() {
-    const catalog = await discoverSkillsFromDirectory(this.#skillsPath);
+    const catalog = await discoverSkillsFromDirectories(this.#skillsPath);
     if (catalog.diagnostics.length) throw requestFailure("invalid_skill_catalog", catalog.diagnostics.map((item) => item.error).join("; "));
     catalog.skills = await materializeSkills(catalog.skills, { artifactRoot: this.#skillArtifactRoot });
     const skills = skillCatalogForSkills(catalog.skills);
@@ -135,7 +135,7 @@ export class SkillRuntimeCoordinator {
 
   async #rootSkillCatalog(previous) {
     try {
-      const catalog = await discoverSkillsFromDirectory(this.#skillsPath);
+      const catalog = await discoverSkillsFromDirectories(this.#skillsPath);
       if (catalog.diagnostics.length) throw new Error(catalog.diagnostics.map((item) => item.error).join("; "));
       catalog.skills = await materializeSkills(catalog.skills, { artifactRoot: this.#skillArtifactRoot });
       const skills = skillCatalogForSkills(catalog.skills);

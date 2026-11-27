@@ -48,7 +48,7 @@ import { HarnessStore } from "./store.mjs";
 import { HomeFailureNudge } from "./home-failure-nudge.mjs";
 import { PythonRuntimeManager } from "./python-runtime.mjs";
 import { RUNTIME_DIRECTORY_ENV, runtimeDirectory } from "./python-runtime-layout.mjs";
-import { grantedManifestSkills } from "./skills.mjs";
+import { grantedManifestSkills, skillDirectories } from "./skills.mjs";
 import { defaultRootName, resolveRootTitle, firstCompletedTitleTurn, rootTitleExcerpt } from "./root-title.mjs";
 import { createRootTitleGenerator } from "./root-title-generator.mjs";
 
@@ -203,7 +203,7 @@ export class HarnessSupervisor {
       backgroundJobsDirectory, scratchDirectory,
       backgroundCompletionIntervalMs, titleGenerator, notificationIdleMs, notificationTickMs });
     this.#homeNudge = homeNudge;
-    this.skillsPath = path.resolve(skillsPath);
+    this.skillsPath = skillDirectories(skillsPath).join(path.delimiter);
     this.skillArtifactRoot = path.join(path.dirname(path.resolve(databasePath)), "skill-artifacts");
     this.runtimeDir = path.resolve(runtimeDir);
     this.runtimeProvisioner = runtimeProvisioner ?? ((skills, { approved = false, onProgress = () => {} } = {}) => new PythonRuntimeManager({ runtimeDir: this.runtimeDir }).ensure({
