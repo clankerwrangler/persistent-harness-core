@@ -14,7 +14,7 @@ test("owned process identity survives PID checks and refuses mismatched reuse id
   const token = crypto.randomUUID();
   const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], {
     detached: true,
-    env: { ...process.env, PI_HARNESS_ACTOR_TOKEN: token },
+    env: { ...process.env, HARNESS_ACTOR_TOKEN: token },
     stdio: "ignore",
   });
   const exited = once(child, "exit"), closed = once(child, "close");
@@ -45,7 +45,7 @@ test("owned process identity survives PID checks and refuses mismatched reuse id
 test("parses Linux proc identity fields and matches exact environment entries", () => {
   const fake = `123 (node worker) S 1 123 123 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 98765 0`;
   assert.deepEqual(processOwnershipInternals.parseProcStat(fake), { processGroup: 123, startTime: "98765" });
-  const environment = Buffer.from("A=1\0PI_HARNESS_ACTOR_TOKEN=secret\0OTHER=2\0");
+  const environment = Buffer.from("A=1\0HARNESS_ACTOR_TOKEN=secret\0OTHER=2\0");
   assert.equal(processOwnershipInternals.hasEnvironmentToken(environment, "secret"), true);
   assert.equal(processOwnershipInternals.hasEnvironmentToken(environment, "sec"), false);
 });
@@ -53,7 +53,7 @@ test("parses Linux proc identity fields and matches exact environment entries", 
 test("scratch process proof is exact, bounded, and read-only", async t => {
   const rootId = crypto.randomUUID(), unrelated = crypto.randomUUID();
   const child = spawn(process.execPath, ["-e", "console.log('ready');setInterval(()=>{},1000)"], {
-    env: { ...process.env, PI_HARNESS_ROOT_SESSION_ID: rootId }, stdio: ["ignore", "pipe", "ignore"] });
+    env: { ...process.env, HARNESS_ROOT_SESSION_ID: rootId }, stdio: ["ignore", "pipe", "ignore"] });
   t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
   await once(child.stdout, "data");
   // A sample that could not finish proves nothing and reports no root, so only a complete one is asserted.

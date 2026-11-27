@@ -1,5 +1,5 @@
-const namespace = process.env.PI_HARNESS_PRESENTATION_NAMESPACE || "harness";
-if (!/^[a-z][a-z0-9-]{0,31}$/.test(namespace)) throw new Error("PI_HARNESS_PRESENTATION_NAMESPACE must be a lowercase namespace of at most 32 characters");
+const namespace = process.env.HARNESS_PRESENTATION_NAMESPACE || "harness";
+if (!/^[a-z][a-z0-9-]{0,31}$/.test(namespace)) throw new Error("HARNESS_PRESENTATION_NAMESPACE must be a lowercase namespace of at most 32 characters");
 export const PRESENTATION_SCHEMA = `${namespace}.presentation.v1`;
 export const PRESENTATION_DIRECTIVE_MAX_BYTES = 256;
 export const PRESENTATION_BODY_VALUES = Object.freeze([

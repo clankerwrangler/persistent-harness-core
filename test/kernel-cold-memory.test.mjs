@@ -61,7 +61,7 @@ test("ordinary existing kernel automatically cold-tiers while actor may be think
 
 import { spawnSync } from "node:child_process";
 test("cold residency numeric policy, hot/locked ranges, unsupported and fixed work bounds",()=>{
- const result=spawnSync(process.env.PI_HARNESS_PYTHON||"python3",["-B",path.join(import.meta.dirname,"kernel-cold-memory.py")],{encoding:"utf8",timeout:10000,maxBuffer:65536});
+ const result=spawnSync(process.env.HARNESS_PYTHON||"python3",["-B",path.join(import.meta.dirname,"kernel-cold-memory.py")],{encoding:"utf8",timeout:10000,maxBuffer:65536});
  assert.equal(result.status,0,result.error?.message||result.stderr||result.stdout);
 });
 
@@ -112,7 +112,7 @@ for line in control:
 `);
  const hostEntered=Promise.withResolvers(),hostRelease=Promise.withResolvers();
  t.mock.timers.enable({apis:["setTimeout","Date"],now:Date.now()});
- const kernel=new PythonKernel({pythonPath:process.env.PI_HARNESS_PYTHON||"python3",kernelScript:script,runtimeSupportDir:path.join(rootSource,"python-runtime"),cwd:root,stateDir:path.join(root,"state"),manifest:{version:1,skills:[{python:{srcPath:root,hostRequests:["fixture.host"]}}]},hostHandlers:{"fixture.host":async()=>{hostEntered.resolve();await hostRelease.promise;return {ok:true};}}});
+ const kernel=new PythonKernel({pythonPath:process.env.HARNESS_PYTHON||"python3",kernelScript:script,runtimeSupportDir:path.join(rootSource,"python-runtime"),cwd:root,stateDir:path.join(root,"state"),manifest:{version:1,skills:[{python:{srcPath:root,hostRequests:["fixture.host"]}}]},hostHandlers:{"fixture.host":async()=>{hostEntered.resolve();await hostRelease.promise;return {ok:true};}}});
  const has=file=>access(path.join(root,file)).then(()=>true,()=>false);
  const release=file=>writeFile(path.join(root,file),"ready");
  const commands=()=>readFile(path.join(root,"commands"),"utf8").catch(()=>"");

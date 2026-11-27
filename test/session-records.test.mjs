@@ -27,7 +27,7 @@ const lo = from === undefined ? 0 : Number(from), hi = to === undefined ? Infini
 process.stdout.write(JSON.stringify(all.filter(e => Number(e.id) >= lo && Number(e.id) <= hi)));
 `);
   await chmod(bin, 0o755);
-  return { env: { ...process.env, PI_HARNESS_CORE_BIN: bin }, dir };
+  return { env: { ...process.env, HARNESS_CORE_BIN: bin }, dir };
 }
 
 test("the supervisor's reads are answered by the session half's one-off reader, as the reader itself answers them", async (t) => {

@@ -66,12 +66,12 @@ test("cache entry rejects unsafe paths and honors operator disable and explicit 
   assert.equal((await lstat(unsafe)).mode & 0o7777, 0o755);
   await symlink(cache, link); await writeFile(file, "not a directory");
   for (const candidate of [unsafe, link, file, path.join(root, "missing")]) {
-    assert.equal((await probe(root, { PI_HARNESS_ACTOR_COMPILE_CACHE: candidate })).cache, null);
+    assert.equal((await probe(root, { HARNESS_ACTOR_COMPILE_CACHE: candidate })).cache, null);
   }
-  assert.equal((await probe(root, { PI_HARNESS_ACTOR_COMPILE_CACHE: cache, NODE_DISABLE_COMPILE_CACHE: "1" })).cache, null);
-  assert.equal((await probe(root, { PI_HARNESS_ACTOR_COMPILE_CACHE: cache, NODE_COMPILE_CACHE: "" })).cache, null);
+  assert.equal((await probe(root, { HARNESS_ACTOR_COMPILE_CACHE: cache, NODE_DISABLE_COMPILE_CACHE: "1" })).cache, null);
+  assert.equal((await probe(root, { HARNESS_ACTOR_COMPILE_CACHE: cache, NODE_COMPILE_CACHE: "" })).cache, null);
   const explicit = path.join(root, "operator");
-  const operator = await probe(root, { PI_HARNESS_ACTOR_COMPILE_CACHE: cache, NODE_COMPILE_CACHE: explicit });
+  const operator = await probe(root, { HARNESS_ACTOR_COMPILE_CACHE: cache, NODE_COMPILE_CACHE: explicit });
   assert(operator.cache.startsWith(explicit + path.sep)); assert.equal(operator.inherited, explicit);
   assert.deepEqual(await readdir(cache), [], "The unused owned path is not repaired or populated");
 });
@@ -80,7 +80,7 @@ test("normal Node cache invalidates changed source and evaluates fresh state in 
   const root = await privateRoot(t), cache = path.join(root, "cache"), source = path.join(root, "module.mjs");
   await mkdir(cache, { mode: 0o700 });
   const code = value => `import { randomUUID } from 'node:crypto'; export const identity=randomUUID(); export default ${value};\n`;
-  const env = { PI_HARNESS_ACTOR_COMPILE_CACHE: cache };
+  const env = { HARNESS_ACTOR_COMPILE_CACHE: cache };
   await writeFile(source, code(11)); const first = await probe(root, env, source);
   assert(first.cache.startsWith(cache + path.sep)); assert.equal(first.value, 11); assert.equal(first.inherited, null);
   assert((await readdir(first.cache)).length > 0, "Normal process exit flushes the compile cache");

@@ -16,7 +16,7 @@ test("snapshots stay bounded, reuse verified blobs, swap atomically, and reject 
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const catalog = await discoverSkills([{
     source: "skill",
-    path: path.join(process.env.PI_HARNESS_SKILLS_PATH || path.join(packageRoot, "skills"), "files", "SKILL.md"),
+    path: path.join(process.env.HARNESS_SKILLS_PATH || path.join(packageRoot, "skills"), "files", "SKILL.md"),
   }]);
   const manifest = manifestForSkills(catalog.skills);
   const runtime = await new PythonRuntimeManager({ runtimeDir: path.join(root, "runtime") }).ensure({

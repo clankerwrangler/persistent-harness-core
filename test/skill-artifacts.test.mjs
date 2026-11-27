@@ -44,7 +44,7 @@ test("shared immutable artifacts retain raw source identity and old generation b
   assert.notEqual(second.contentHash, first.contentHash);
   assert.match(await readFile(path.join(first.python.srcPath, "demo", "__init__.py"), "utf8"), /first/);
   assert.deepEqual(await verifyManifest(old), old);
-  const imported = execFileSync(process.env.PI_HARNESS_PYTHON || "python3", ["-c", "import demo; print(demo.run()); print(demo.__file__)"], {
+  const imported = execFileSync(process.env.HARNESS_PYTHON || "python3", ["-c", "import demo; print(demo.run()); print(demo.__file__)"], {
     env: { ...process.env, PYTHONPATH: first.python.srcPath, PYTHONDONTWRITEBYTECODE: "1" }, encoding: "utf8", timeout: 120_000, maxBuffer: 65536,
   }).trim().split("\n");
   assert.equal(imported[0], "first"); assert(imported[1].startsWith(first.python.srcPath));

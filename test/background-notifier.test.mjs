@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import { BackgroundCompletionMonitor, backgroundCompletionMessage, defaultBackgroundJobsDirectory } from "../src/background-notifier.mjs";
 
 test("background job storage follows the configured agent directory", () => {
-  assert.equal(defaultBackgroundJobsDirectory({ PI_CODING_AGENT_DIR: "/tmp/custom-agent" }), "/tmp/custom-agent/state/background-jobs");
+  assert.equal(defaultBackgroundJobsDirectory({ HARNESS_DIR: "/tmp/custom-agent" }), "/tmp/custom-agent/state/background-jobs");
 });
 
 async function createJob(directory, id, { sessionId = "session-a", exitCode = 0, signal = null, kind = "launched", owner = true, endedAt = new Date().toISOString() } = {}) {
@@ -104,7 +104,7 @@ test("background completion monitor retries an unavailable actor handoff and ign
 
 async function liveProcess(t, jobId) {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-    stdio: "ignore", env: jobId ? { PI_BACKGROUND_JOB_ID: jobId } : {},
+    stdio: "ignore", env: jobId ? { HARNESS_BACKGROUND_JOB_ID: jobId } : {},
   });
   t.after(async () => {
     if (child.exitCode !== null || child.signalCode !== null) return;
@@ -301,7 +301,7 @@ test("canonical Python launch and adoption stay visible until their terminal mar
     }, 3000).catch(() => {});
     await rm(root, { recursive: true, force: true });
   });
-  const { stdout } = await promisify(execFile)(process.env.PI_HARNESS_PYTHON || "python3", ["-c", `
+  const { stdout } = await promisify(execFile)(process.env.HARNESS_PYTHON || "python3", ["-c", `
 import asyncio, json, sys
 import harness_background
 async def run():
@@ -313,8 +313,8 @@ asyncio.run(run())
 `, String(identity.pid)], {
     cwd: root,
     env: {
-      PATH: process.env.PATH, HOME: root, PI_CODING_AGENT_DIR: agentDirectory, PI_HARNESS_ACTOR_ID: "canonical-owner",
-      PYTHONPATH: path.join(process.env.PI_HARNESS_SKILLS_PATH || path.resolve(import.meta.dirname, "../skills"), "background", "src"),
+      PATH: process.env.PATH, HOME: root, HARNESS_DIR: agentDirectory, HARNESS_ACTOR_ID: "canonical-owner",
+      PYTHONPATH: path.join(process.env.HARNESS_SKILLS_PATH || path.resolve(import.meta.dirname, "../skills"), "background", "src"),
       PYTHONDONTWRITEBYTECODE: "1",
     },
     timeout: 120_000, maxBuffer: 64 * 1024,
@@ -341,7 +341,7 @@ asyncio.run(run())
 test("a zombie with a matching starttime and no terminal marker is not active", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "background-notifier-zombie-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const holder = spawn(process.env.PI_HARNESS_PYTHON || "python3", ["-c", `
+  const holder = spawn(process.env.HARNESS_PYTHON || "python3", ["-c", `
 import os, sys
 pid = os.fork()
 if pid == 0:

@@ -1,6 +1,6 @@
 // Sessions on the conversation core, end to end: a test supervisor, the core worker,
-// the real core binary and a fake provider. Needs PI_HARNESS_CORE_BIN and PI_HARNESS_CORE_JS;
-// the Python test also needs an installed kernel runtime under PI_CODING_AGENT_DIR.
+// the real core binary and a fake provider. Needs HARNESS_CORE_BIN and HARNESS_CORE_JS;
+// the Python test also needs an installed kernel runtime under HARNESS_DIR.
 import assert from "node:assert/strict";
 import test from "node:test";
 import http from "node:http";
@@ -10,9 +10,9 @@ import os from "node:os";
 import { HarnessSupervisor } from "./fixtures/isolated-supervisor.mjs";
 import { HarnessClient } from "../src/client.mjs";
 
-const ready = Boolean(process.env.PI_HARNESS_CORE_BIN && process.env.PI_HARNESS_CORE_JS);
-const runtimeReady = ready && (Boolean(process.env.PI_HARNESS_PYTHON) || (Boolean(process.env.PI_CODING_AGENT_DIR)
-  && await access(path.join(process.env.PI_CODING_AGENT_DIR, "harness/kernel-runtime/environments")).then(() => true, () => false)));
+const ready = Boolean(process.env.HARNESS_CORE_BIN && process.env.HARNESS_CORE_JS);
+const runtimeReady = ready && (Boolean(process.env.HARNESS_PYTHON) || (Boolean(process.env.HARNESS_DIR)
+  && await access(path.join(process.env.HARNESS_DIR, "harness/kernel-runtime/environments")).then(() => true, () => false)));
 
 const itemText = (item) => typeof item?.content === "string" ? item.content
   : (item?.content ?? []).map((part) => part.text ?? "").join("");
@@ -58,7 +58,7 @@ function fakeProvider(decide) {
 async function harness(t, decide, { models: served = [["test", "m"]], signedIn = true, settings = null } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "core-e2e-"));
   const cwd = path.join(root, "project");
-  const agentDir = settings ? path.join(root, "agent") : process.env.PI_CODING_AGENT_DIR ?? path.join(root, "agent");
+  const agentDir = settings ? path.join(root, "agent") : process.env.HARNESS_DIR ?? path.join(root, "agent");
   if (settings) { await mkdir(agentDir, { recursive: true }); await writeFile(path.join(agentDir, "settings.json"), JSON.stringify(settings)); }
   await mkdir(cwd); await mkdir(agentDir, { recursive: true });
   const provider = fakeProvider(decide);
@@ -68,9 +68,9 @@ async function harness(t, decide, { models: served = [["test", "m"]], signedIn =
   await writeFile(models, JSON.stringify({ models: Object.fromEntries(served.map(([provider, id]) => [id,
     { provider, id, name: id, api: "openai-responses", baseUrl: base, contextWindow: 100_000, reasoning: Boolean(settings) }])) }));
   await writeFile(auth, JSON.stringify(signedIn ? Object.fromEntries(served.map(([provider]) => [provider, { type: "api_key", key: "t" }])) : {}), { mode: 0o600 });
-  const previous = { PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, PI_HARNESS_CORE_ARGS: process.env.PI_HARNESS_CORE_ARGS };
-  process.env.PI_CODING_AGENT_DIR = agentDir;
-  process.env.PI_HARNESS_CORE_ARGS = JSON.stringify(["--models", models, "--auth", auth, "--catalog", path.join(root, "catalog"), "--agent-dir", agentDir]);
+  const previous = { HARNESS_DIR: process.env.HARNESS_DIR, HARNESS_CORE_ARGS: process.env.HARNESS_CORE_ARGS };
+  process.env.HARNESS_DIR = agentDir;
+  process.env.HARNESS_CORE_ARGS = JSON.stringify(["--models", models, "--auth", auth, "--catalog", path.join(root, "catalog"), "--agent-dir", agentDir]);
   const h = { root, cwd, agentDir, bodies: provider.bodies };
   t.after(async () => {
     await h.client?.stop(); await h.supervisor?.stop();

@@ -25,9 +25,9 @@ test("background completion during supervisor downtime revives its real owner ex
   const jobsDirectory = path.join(agentDir, "state", "background-jobs");
   const releasePath = path.join(cwd, "release-job");
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
-  const previous = new Map(["PI_CODING_AGENT_DIR", "PI_HARNESS_AUTO_INSTALL", "PI_HARNESS_CORE_ARGS", "PI_HARNESS_CORE_SESSIONS"].map((key) => [key, process.env[key]]));
-  process.env.PI_CODING_AGENT_DIR = agentDir;
-  process.env.PI_HARNESS_AUTO_INSTALL ??= "0";
+  const previous = new Map(["HARNESS_DIR", "HARNESS_AUTO_INSTALL", "HARNESS_CORE_ARGS", "HARNESS_CORE_SESSIONS"].map((key) => [key, process.env[key]]));
+  process.env.HARNESS_DIR = agentDir;
+  process.env.HARNESS_AUTO_INSTALL ??= "0";
   let supervisor;
   let client;
   let jobDirectory;

@@ -30,9 +30,9 @@ function isMissing(error) {
 }
 
 export function promptPrefixPath(env = process.env) {
-  const root = typeof env?.PI_CODING_AGENT_DIR === "string" && env.PI_CODING_AGENT_DIR
-    ? env.PI_CODING_AGENT_DIR
-    : path.join(os.homedir(), ".pi", "agent");
+  const root = typeof env?.HARNESS_DIR === "string" && env.HARNESS_DIR
+    ? env.HARNESS_DIR
+    : path.join(os.homedir(), ".harness");
   return path.join(root, "state", "prompt-prefix.json");
 }
 

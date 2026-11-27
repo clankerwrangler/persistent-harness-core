@@ -65,15 +65,15 @@ test("an older core that does not know the cleanup protocol is never asked to de
   const old = path.join(dir, "old-core"), recording = path.join(dir, "new-core"), seen = path.join(dir, "seen");
   await writeFile(old, `#!/bin/sh\nfor a in "$@"; do [ "$a" = --protocol ] && { echo "usage" >&2; exit 2; }; done\nrm -f "$2"/log/*.payload.jsonl; echo '{"deleted":[],"bytes":0}'\n`, { mode: 0o755 });
   await writeFile(recording, `#!/bin/sh\necho "$@" > "${seen}"\necho '{"deleted":[],"bytes":0}'\n`, { mode: 0o755 });
-  await assert.rejects(coreReap(session, REAP_AGE_SECONDS, { keepDetails: RECOVERY_DETAIL_FIELDS, env: { ...process.env, PI_HARNESS_CORE_BIN: old } }));
+  await assert.rejects(coreReap(session, REAP_AGE_SECONDS, { keepDetails: RECOVERY_DETAIL_FIELDS, env: { ...process.env, HARNESS_CORE_BIN: old } }));
   assert.ok(existsSync(path.join(session, "log/000001.payload.jsonl")), "nothing deleted");
-  await coreReap(session, REAP_AGE_SECONDS, { keepDetails: RECOVERY_DETAIL_FIELDS, env: { ...process.env, PI_HARNESS_CORE_BIN: recording } });
+  await coreReap(session, REAP_AGE_SECONDS, { keepDetails: RECOVERY_DETAIL_FIELDS, env: { ...process.env, HARNESS_CORE_BIN: recording } });
   const args = (await readFile(seen, "utf8")).trim().split(" ");
   assert.deepEqual(args.slice(-2), ["--protocol", REAP_PROTOCOL]);
   assert.equal(REAP_PROTOCOL, "2");
 });
 
-const coreReady = Boolean(process.env.PI_HARNESS_CORE_BIN);
+const coreReady = Boolean(process.env.HARNESS_CORE_BIN);
 
 test("the core deletes only old unreferenced tool output, keeps messages and the current chunk", { skip: !coreReady && "core binary not configured" }, async (t) => {
   const dir = await folder(t), session = path.join(dir, "s");

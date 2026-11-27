@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { coreLiveFixture, until } from "./fixtures/core-live.mjs";
 
-const ready = Boolean(process.env.PI_HARNESS_CORE_BIN && process.env.PI_HARNESS_CORE_JS && process.env.PI_HARNESS_PYTHON);
+const ready = Boolean(process.env.HARNESS_CORE_BIN && process.env.HARNESS_CORE_JS && process.env.HARNESS_PYTHON);
 const call = (name, id, args, async = false) => ({ type: "response.output_item.done", item: {
   type: "function_call", id: `fc_${id}`, call_id: id, name, arguments: JSON.stringify(args),
   ...(async ? { async: true } : {}), status: "completed" } });
@@ -88,8 +88,8 @@ test("without a step record, expired historical recovery facts are reported as u
   const session = f.supervisor.store.getSession(f.sessionId);
   assert(session?.sessionFile);
   await f.client.request("stop_session", { sessionId: f.sessionId });
-  const { Core } = await import(pathToFileURL(process.env.PI_HARNESS_CORE_JS).href);
-  const core = Core.start({ bin: process.env.PI_HARNESS_CORE_BIN, dir: session.sessionFile });
+  const { Core } = await import(pathToFileURL(process.env.HARNESS_CORE_JS).href);
+  const core = Core.start({ bin: process.env.HARNESS_CORE_BIN, dir: session.sessionFile });
   try { await core.checkpoint([{ role: "user", content: [{ type: "text", text: "edited context" }] }]); }
   finally { await core.close(); }
   await rm(path.join(session.sessionFile, "log/000001.payload.jsonl"));

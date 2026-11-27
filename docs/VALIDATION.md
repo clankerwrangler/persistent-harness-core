@@ -11,21 +11,21 @@ npm run test:specs        # TLC model checks against specification/expected-resu
 ```
 
 `bin/run-tests.mjs` gives every run a private temporary `HOME` and
-`PI_CODING_AGENT_DIR`, sets `PI_HARNESS_AUTO_INSTALL=0` and `UV_OFFLINE=1`, and
-points `PI_HARNESS_SKILLS_PATH` at this checkout unless overridden. It never
+`HARNESS_DIR`, sets `HARNESS_AUTO_INSTALL=0` and `UV_OFFLINE=1`, and
+points `HARNESS_SKILLS_PATH` at this checkout unless overridden. It never
 downloads a runtime.
 
-- Integration files need the conversation core: set `PI_HARNESS_CORE_BIN` and
-  `PI_HARNESS_CORE_JS`. Without them those files are skipped, with the reason.
-- Set `PI_HARNESS_PYTHON` to select an interpreter; otherwise discovery checks
+- Integration files need the conversation core: set `HARNESS_CORE_BIN` and
+  `HARNESS_CORE_JS`. Without them those files are skipped, with the reason.
+- Set `HARNESS_PYTHON` to select an interpreter; otherwise discovery checks
   `<agent dir>/harness/kernel-runtime/environments/`.
-- For files that read `PI_HARNESS_TEST_MANAGED_SEED`, the runner copies `bin/`,
+- For files that read `HARNESS_TEST_MANAGED_SEED`, the runner copies `bin/`,
   `cache/`, and `python/` (never `environments/`) from the managed runtime into
   private temporary state.
 
 The runner uses a 100 ms background-completion scan
-(`PI_HARNESS_BACKGROUND_COMPLETION_TICK_MS`) and runs three test files at a time
-(`PI_HARNESS_TEST_CONCURRENCY`); each file has its own process and temporary state.
+(`HARNESS_BACKGROUND_COMPLETION_TICK_MS`) and runs three test files at a time
+(`HARNESS_TEST_CONCURRENCY`); each file has its own process and temporary state.
 
 `bin/test-image.sh --core <core checkout>` builds a test image with the core, Python and
 the TLA+ tools, and runs the whole suite inside it with no network. `--cpus N --runs N`
@@ -36,7 +36,7 @@ for later runs. A fresh isolated builder cannot reuse earlier build layers.
 
 `bin/check-specs.mjs` runs TLC on every `specification/*.cfg` and compares each outcome (`pass`, `violation`, `error`) with `specification/expected-results.json`; negative controls are recorded as `violation`. Set `TLA2TOOLS` and `JAVA` when the tools are not at `/opt/tla/tla2tools-1.7.4.jar` and on `PATH`. After an intentional model change, rerun the affected configurations with `--record` and review the diff.
 
-The tests use isolated temporary state, fake providers, and local processes. All supervisor tests, including fake-worker tests, need private `HOME` and `PI_CODING_AGENT_DIR`: a temporary database alone does not isolate sessions or background notifications. The default background directory is `$PI_CODING_AGENT_DIR/state/background-jobs` (otherwise `$HOME/.pi/agent/state/background-jobs`); any explicit `backgroundJobsDirectory` must also be test-private. Never point tests at running service state or live credentials. For offline real-worker checks, set `PI_HARNESS_PYTHON` to an existing compatible interpreter and `PI_HARNESS_AUTO_INSTALL=0`.
+The tests use isolated temporary state, fake providers, and local processes. All supervisor tests, including fake-worker tests, need private `HOME` and `HARNESS_DIR`: a temporary database alone does not isolate sessions or background notifications. The default background directory is `$HARNESS_DIR/state/background-jobs` (otherwise `$HOME/.harness/state/background-jobs`); any explicit `backgroundJobsDirectory` must also be test-private. Never point tests at running service state or live credentials. For offline real-worker checks, set `HARNESS_PYTHON` to an existing compatible interpreter and `HARNESS_AUTO_INSTALL=0`.
 
 Real-worker tests run the actual core against local fake providers:
 `test/fixtures/core-fake-provider.mjs` speaks Chat Completions, and
@@ -47,9 +47,9 @@ held Python calls can be exercised. Tests that only check the supervisor give se
 entry per line in the shape the core hands entries out.
 
 Fixtures with literal `harness.presentation.v1` directives require
-`PI_HARNESS_PRESENTATION_NAMESPACE=harness` in the test process.
+`HARNESS_PRESENTATION_NAMESPACE=harness` in the test process.
 
-The managed-runtime test explicitly exercises actual managed reuse and dependency rebuild, not the interpreter override. The stock-worker provisioning fixture also clears the override locally to check the real consent path. An optional `PI_HARNESS_TEST_MANAGED_SEED` can contain only cached `bin/uv-0.12.3`, `python/cpython-3.12.12-linux-x86_64-gnu`, and package `cache/` prerequisites. Both fixtures copy only these prerequisites into their temporary runtime; neither copies completed environments. The kernel test denies Node fetch. Set `UV_OFFLINE=1` for both offline runs. Do not supply completed environments, sessions, credentials, or kernel state as the seed. Without cached prerequisites, managed provisioning needs its documented downloads.
+The managed-runtime test explicitly exercises actual managed reuse and dependency rebuild, not the interpreter override. The stock-worker provisioning fixture also clears the override locally to check the real consent path. An optional `HARNESS_TEST_MANAGED_SEED` can contain only cached `bin/uv-0.12.3`, `python/cpython-3.12.12-linux-x86_64-gnu`, and package `cache/` prerequisites. Both fixtures copy only these prerequisites into their temporary runtime; neither copies completed environments. The kernel test denies Node fetch. Set `UV_OFFLINE=1` for both offline runs. Do not supply completed environments, sessions, credentials, or kernel state as the seed. Without cached prerequisites, managed provisioning needs its documented downloads.
 
 Filesystem race fixtures order the adversarial operation at the actual syscall
 boundary: parent detachment completes after link/rename and before publication
@@ -59,7 +59,7 @@ limits without relying on inotify delivery or a busy rename loop.
 
 Browser assets, the HTTP adapter, and browser-only tests live in the separate WebUI. Client-neutral protocol/history tests remain here.
 
-The lifecycle test supervisor wrapper supplies test-private scratch and background directories. Run with private `HOME` and `PI_CODING_AGENT_DIR` as required above.
+The lifecycle test supervisor wrapper supplies test-private scratch and background directories. Run with private `HOME` and `HARNESS_DIR` as required above.
 
 `session-scratch.test.mjs` covers canonical root/child/grandchild propagation, generation revival, child preservation, actor-stop fencing, deferred detached ownership under tombstoned descendants, an orphan writer surviving its leader, restart recovery without replay, unknown metadata, discovery beyond the 128-job presentation cache, unrelated-history reuse, and unowned/traversal/symlink/substituted-path rejection. `kernel-scratch.test.mjs` checks the real Python alias, protected restore behavior, and explicit kernel/host-shell marker propagation. Process-owner tests exercise exact matching and each sample bound. All destructive fixtures are automatically cleaned temporary trees.
 

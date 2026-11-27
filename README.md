@@ -20,7 +20,7 @@ node bin/provision-skills.mjs --yes
 node bin/harness.mjs --create
 ```
 
-The provisioning command approves downloads of uv and the pinned Python, IPython, and dill versions, along with any skill dependencies. Set `PI_HARNESS_PYTHON` to a compatible existing interpreter instead if provisioning is not wanted. The nine bundled Python-backed skills declare no additional Python packages; `inbox` is guidance-only.
+The provisioning command approves downloads of uv and the pinned Python, IPython, and dill versions, along with any skill dependencies. Set `HARNESS_PYTHON` to a compatible existing interpreter instead if provisioning is not wanted. The nine bundled Python-backed skills declare no additional Python packages; `inbox` is guidance-only.
 
 Provider sign-ins belong to the core. Follow the [sign-in steps](docs/DEPENDENCIES.md#provider-sign-in) to use the same credentials file as harness sessions; the core stores and renews the credentials.
 
@@ -31,7 +31,7 @@ node bin/harness.mjs --list
 node bin/harness.mjs --session SESSION --prompt "Continue the task" --wait
 ```
 
-The terminal supports `:sessions`, `:attach NAME_OR_ID`, `:new [NAME]`, `:abort`, and `:quit`. In Python, inspect `rlm?`, `agent_message?`, `cron?`, or another bundled capability. The default catalog is this repository's `skills/`; `PI_HARNESS_SKILLS_PATH` selects another complete catalog.
+The terminal supports `:sessions`, `:attach NAME_OR_ID`, `:new [NAME]`, `:abort`, and `:quit`. In Python, inspect `rlm?`, `agent_message?`, `cron?`, or another bundled capability. The default catalog is this repository's `skills/`; `HARNESS_SKILLS_PATH` selects another complete catalog.
 
 The harness retains child delegation and context forking, durable family messages, scheduled jobs, detached processes, session-history search, model selection, image inputs, checkpoint diagnostics, and client-neutral protocol APIs. A session's history only grows: there is no compaction and no rewind; the model rewrites its own context when it needs room. [Native asynchronous execution](docs/ASYNC_EXECUTION.md) requires explicit provider/model support; ordinary synchronous tool execution remains available without it.
 

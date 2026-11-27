@@ -14,7 +14,7 @@ test("namespace values holding skills restore as references to the live skills",
   t.after(() => rm(root, { recursive: true, force: true }));
   const catalog = await discoverSkills([{
     source: "skill",
-    path: path.join(process.env.PI_HARNESS_SKILLS_PATH || path.join(packageRoot, "skills"), "files", "SKILL.md"),
+    path: path.join(process.env.HARNESS_SKILLS_PATH || path.join(packageRoot, "skills"), "files", "SKILL.md"),
   }]);
   const manifest = manifestForSkills(catalog.skills);
   const runtime = await new PythonRuntimeManager({ runtimeDir: path.join(root, "runtime") }).ensure({

@@ -8,7 +8,7 @@ import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 
 export const SKILL_GRANT_VERSION = 2;
-export const SKILL_GRANT_ENV = "PI_HARNESS_ACTOR_SKILL_GRANT";
+export const SKILL_GRANT_ENV = "HARNESS_ACTOR_SKILL_GRANT";
 
 export function actorGenerationSkillGrantPath(sessionFile, generation, digest) {
   if (!Number.isSafeInteger(generation) || generation < 1 || typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)) {
@@ -69,8 +69,8 @@ let grantPromise;
 export async function readActorSkillGrant(env = process.env) {
   const grantPath = env[SKILL_GRANT_ENV] || null;
   if (!grantPath) return null;
-  const actorId = env.PI_HARNESS_ACTOR_ID || null;
-  const generation = env.PI_HARNESS_ACTOR_GENERATION ? Number(env.PI_HARNESS_ACTOR_GENERATION) : null;
+  const actorId = env.HARNESS_ACTOR_ID || null;
+  const generation = env.HARNESS_ACTOR_GENERATION ? Number(env.HARNESS_ACTOR_GENERATION) : null;
   grantPromise ??= (async () => {
     const identity = actorGenerationGrantIdentity(grantPath);
     const stat = await lstat(grantPath);

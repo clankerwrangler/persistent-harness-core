@@ -36,7 +36,7 @@ test("inputs already in history at startup are the supervisor's to reconcile; ne
   const history = [userEntry("1", "old-user-input"), { type: "custom_message", id: "2", timestamp: new Date(2).toISOString(), ...actorInputCustomPayload(input) }];
   const core = fakeCore(history);
   const worker = new CoreWorker({ core, options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
-    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    env: { HARNESS_ACTOR_ID: "s", HARNESS_ACTOR_TOKEN: "token", HARNESS_ACTOR_GENERATION: "1" },
     cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish() {}, agentDir: os.tmpdir() });
   await worker.start();
   assert.deepEqual(requests.filter((r) => r.type === "record_input_delivery"), [], "startup does not sweep history");
@@ -64,7 +64,7 @@ test("work the core takes is published in core order, before the settle that cov
   core.send = () => `js${++next}`; core.steer = () => `js${++next}`;
   core.covered = (id, through) => Number(String(through).slice(2)) >= Number(id.slice(2));
   const worker = new CoreWorker({ core, options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
-    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    env: { HARNESS_ACTOR_ID: "s", HARNESS_ACTOR_TOKEN: "token", HARNESS_ACTOR_GENERATION: "1" },
     cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish, agentDir: os.tmpdir() });
   await worker.start();
 
@@ -97,7 +97,7 @@ test("an input the core refused is not counted as taken by the settle that cover
   core.send = () => `js${++next}`; core.steer = () => `js${++next}`;
   core.covered = (id, through) => Number(String(through).slice(2)) >= Number(id.slice(2));
   const worker = new CoreWorker({ core, options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
-    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    env: { HARNESS_ACTOR_ID: "s", HARNESS_ACTOR_TOKEN: "token", HARNESS_ACTOR_GENERATION: "1" },
     cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish, agentDir: os.tmpdir() });
   await worker.start();
   await worker.handle({ type: "prompt", message: "bad", messageId: "refused" });
@@ -124,7 +124,7 @@ test("an input has one report in flight at a time; one saved during a report is 
   const history = [];
   const core = fakeCore(history);
   const worker = new CoreWorker({ core, options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
-    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    env: { HARNESS_ACTOR_ID: "s", HARNESS_ACTOR_TOKEN: "token", HARNESS_ACTOR_GENERATION: "1" },
     cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish() {}, agentDir: os.tmpdir() });
   await worker.start();
   history.push(userEntry("1", "first"));
@@ -149,7 +149,7 @@ test("a model list reload that fails or runs out of time says so and keeps the l
   let models = async () => listed;
   const core = Object.assign(fakeCore([]), { models: () => models() });
   const worker = new CoreWorker({ core, options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
-    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    env: { HARNESS_ACTOR_ID: "s", HARNESS_ACTOR_TOKEN: "token", HARNESS_ACTOR_GENERATION: "1" },
     cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish() {}, agentDir: os.tmpdir() });
   const registry = worker.hostContext().modelRegistry;
   assert.deepEqual(await registry.refresh(), { aborted: false, errors: new Map() });
@@ -166,7 +166,7 @@ test("tool events reach the supervisor without their arguments or results", asyn
   supervisorConnection(t);
   const core = fakeCore([]), published = [];
   const worker = new CoreWorker({ core, options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
-    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    env: { HARNESS_ACTOR_ID: "s", HARNESS_ACTOR_TOKEN: "token", HARNESS_ACTOR_GENERATION: "1" },
     cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish: (frame) => published.push(frame), agentDir: os.tmpdir() });
   await worker.start();
   core.emit("event", { ev: "tool_call", call: "c1", name: "read", arguments: { path: "x".repeat(100_000) }, async: false, builtin: true });
@@ -184,7 +184,7 @@ test("after a restart the tool-result quiet stretch counts from the last time gi
     message: { role: "user", content: [{ type: "text", text: "[time]", harness: "time" }, { type: "text", text: "later" }], timestamp: 2 } },
     { type: "message", id: "3", timestamp: new Date(Date.UTC(2026, 10, 9, 9, 0)).toISOString(), message: { role: "assistant", content: [], timestamp: 3 } }];
   const worker = new CoreWorker({ core: fakeCore(history), options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
-    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    env: { HARNESS_ACTOR_ID: "s", HARNESS_ACTOR_TOKEN: "token", HARNESS_ACTOR_GENERATION: "1" },
     cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish() {}, agentDir: os.tmpdir() });
   await worker.start();
   assert.equal(worker.clock.last, Date.parse(when));
@@ -199,7 +199,7 @@ test("a model change during a turn waits for the session to settle, then is repo
     setModel: async (change) => { set.push(change); return { model: null, reasoning: null }; },
   });
   const worker = new CoreWorker({ core, options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
-    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    env: { HARNESS_ACTOR_ID: "s", HARNESS_ACTOR_TOKEN: "token", HARNESS_ACTOR_GENERATION: "1" },
     cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish: (frame) => published.push(frame), agentDir: os.tmpdir() });
   await worker.start();
   set.length = 0;
@@ -239,7 +239,7 @@ test("input reporting reads incrementally from the last reported entry and retri
     addContext: async () => history.length + 1,
   });
   const worker = new CoreWorker({ core, options: { sessionDir: "/nonexistent", sidecarBase: "/nonexistent" },
-    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_TOKEN: "token", PI_HARNESS_ACTOR_GENERATION: "1" },
+    env: { HARNESS_ACTOR_ID: "s", HARNESS_ACTOR_TOKEN: "token", HARNESS_ACTOR_GENERATION: "1" },
     cwd: os.tmpdir(), broker: { ui: { notify() {} }, close() {}, cancelAll() {} }, publish() {}, agentDir: os.tmpdir() });
   await worker.start();
   historyCalls.length = 0;

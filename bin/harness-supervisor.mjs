@@ -12,7 +12,7 @@ function parseArgs(argv) {
   if (!["start", "ensure", "status", "memory", "shutdown"].includes(command)) {
     throw new Error("usage: harness-supervisor <start|ensure|status|memory --session ID|shutdown> [--socket PATH] [--db PATH] [--pid PATH]");
   }
-  const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+  const agentDir = process.env.HARNESS_DIR || path.join(os.homedir(), ".harness");
   const harnessDir = path.join(agentDir, "harness");
   const options = {
     command,

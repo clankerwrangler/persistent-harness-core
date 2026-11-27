@@ -23,7 +23,7 @@ async function readIn(t, grant) {
   const module = new URL("../src/skill-grant.mjs", import.meta.url).href;
   return new Promise((resolve) => execFile(process.execPath, ["--input-type=module", "-e",
     `import { readActorSkillGrant } from ${JSON.stringify(module)}; try { const g = await readActorSkillGrant(); console.log(JSON.stringify({ ok: g.manifestSkills.map(s => s.id) })); } catch (e) { console.log(JSON.stringify({ error: e.message })); }`],
-    { env: { ...process.env, PI_HARNESS_ACTOR_SKILL_GRANT: file, PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_GENERATION: "3" } },
+    { env: { ...process.env, HARNESS_ACTOR_SKILL_GRANT: file, HARNESS_ACTOR_ID: "s", HARNESS_ACTOR_GENERATION: "3" } },
     (_error, stdout) => resolve(JSON.parse(stdout))));
 }
 

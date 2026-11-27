@@ -25,14 +25,14 @@ function parse(argv) {
   return { command, name, flags };
 }
 
-const databasePath = process.env.PI_HARNESS_DB
-  || path.join(process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"), "harness", "harness.sqlite");
+const databasePath = process.env.HARNESS_DB
+  || path.join(process.env.HARNESS_DIR || path.join(os.homedir(), ".harness"), "harness", "harness.sqlite");
 
 async function main() {
   const { command, name, flags } = parse(process.argv.slice(2));
   if (command === "send") {
     const key = readFileSync(flags["key-file"], "utf8").trim();
-    const url = flags.url ?? `http://127.0.0.1:${process.env.PI_HARNESS_INBOX_PORT ?? 8790}`;
+    const url = flags.url ?? `http://127.0.0.1:${process.env.HARNESS_INBOX_PORT ?? 8790}`;
     const res = await fetch(`${url}/v1/messages`, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({ route: name, id: flags.id, text: flags.text }), signal: AbortSignal.timeout(30_000) });
     console.log(res.status, await res.text());

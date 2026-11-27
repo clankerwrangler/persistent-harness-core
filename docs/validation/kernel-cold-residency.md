@@ -59,7 +59,7 @@ TLC exit 12:
 ## Actual ordinary boundary
 
 ```sh
-PI_HARNESS_PYTHON=MANAGED_PYTHON PI_HARNESS_AUTO_INSTALL=0 node --test test/kernel-cold-memory.test.mjs
+HARNESS_PYTHON=MANAGED_PYTHON HARNESS_AUTO_INSTALL=0 node --test test/kernel-cold-memory.test.mjs
 ```
 
 The checks used the managed kernel runtime's compatible interpreter.
@@ -155,14 +155,14 @@ were copied, no dependency installation occurred, and no full suite ran.
 
 ```sh
 env -i PATH=/usr/local/bin:/usr/bin:/bin \
-  HOME="$RUNTIME/home" PI_CODING_AGENT_DIR="$RUNTIME/home/agent" TMPDIR="$RUNTIME/tmp" \
-  PI_HARNESS_PI_COMMAND="$SOURCE_PI/dist/cli.js" \
-  PI_HARNESS_PI_MODULE="$SOURCE_PI/dist/programmatic.js" \
-  PI_HARNESS_TEST_OFFICIAL_PI_MODULE="$OFFICIAL_PI/dist/index.js" \
-  PI_HARNESS_SKILLS_PATH="$HARNESS/skills" PI_HARNESS_ACTOR_EXTENSIONS='[]' \
-  PI_HARNESS_PYTHON="$MANAGED_PYTHON" PI_HARNESS_AUTO_INSTALL=0 \
-  PI_HARNESS_PRESENTATION_NAMESPACE=harness \
-  PI_HARNESS_CONTEXT_STRING_CODE_UNITS=201326592 UV_OFFLINE=1 \
+  HOME="$RUNTIME/home" HARNESS_DIR="$RUNTIME/home/agent" TMPDIR="$RUNTIME/tmp" \
+  HARNESS_PI_COMMAND="$SOURCE_PI/dist/cli.js" \
+  HARNESS_PI_MODULE="$SOURCE_PI/dist/programmatic.js" \
+  HARNESS_TEST_OFFICIAL_PI_MODULE="$OFFICIAL_PI/dist/index.js" \
+  HARNESS_SKILLS_PATH="$HARNESS/skills" HARNESS_ACTOR_EXTENSIONS='[]' \
+  HARNESS_PYTHON="$MANAGED_PYTHON" HARNESS_AUTO_INSTALL=0 \
+  HARNESS_PRESENTATION_NAMESPACE=harness \
+  HARNESS_CONTEXT_STRING_CODE_UNITS=201326592 UV_OFFLINE=1 \
   node --test --test-concurrency=1 \
   test/kernel-cold-memory.test.mjs test/extension-native-async.test.mjs \
   test/kernel-async.test.mjs test/kernel-completion.test.mjs \

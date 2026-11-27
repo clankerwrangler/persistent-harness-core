@@ -66,7 +66,7 @@ fresh metadata directory. They must report an invariant violation, not a pass.
 ## Focused integration
 
 Nine files pass **115 tests, zero failures, zero skips** with private `HOME` and
-`PI_CODING_AGENT_DIR`, normal `/tmp`, presentation namespace `harness`, the
+`HARNESS_DIR`, normal `/tmp`, presentation namespace `harness`, the
 unchanged official 0.99.1 public SDK, offline prerequisites, and the existing
 256 MiB test CLI heap cap:
 
@@ -215,8 +215,8 @@ To run the benchmark against a source checkout, use private fixture directories:
 ```sh
 PRIVATE=$(mktemp -d)
 mkdir "$PRIVATE/home" "$PRIVATE/agent"
-HOME="$PRIVATE/home" PI_CODING_AGENT_DIR="$PRIVATE/agent" \
-  PI_HARNESS_PRESENTATION_NAMESPACE=harness \
+HOME="$PRIVATE/home" HARNESS_DIR="$PRIVATE/agent" \
+  HARNESS_PRESENTATION_NAMESPACE=harness \
   node --max-old-space-size=256 test/benchmarks/session-open.mjs \
   "$PWD" family-long "$PRIVATE/public-page.json"
 rm -rf "$PRIVATE"

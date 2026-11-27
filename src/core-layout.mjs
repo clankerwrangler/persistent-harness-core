@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 export function agentDirectory(env = process.env) {
-  return path.resolve(env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"));
+  return path.resolve(env.HARNESS_DIR || path.join(os.homedir(), ".harness"));
 }
 
 /**
@@ -15,25 +15,25 @@ export function agentDirectory(env = process.env) {
  * `core/catalog/`, `core/models.json` (optional) and `core/sessions/`.
  */
 export function coreHome(env = process.env) {
-  return path.resolve(env.PI_HARNESS_CORE_HOME || path.join(agentDirectory(env), "core"));
+  return path.resolve(env.HARNESS_CORE_HOME || path.join(agentDirectory(env), "core"));
 }
 
 export function coreSessionsDirectory(env = process.env) {
-  return path.resolve(env.PI_HARNESS_CORE_SESSIONS || path.join(coreHome(env), "sessions"));
+  return path.resolve(env.HARNESS_CORE_SESSIONS || path.join(coreHome(env), "sessions"));
 }
 
-export function coreBinary(env = process.env) { return env.PI_HARNESS_CORE_BIN || path.join(coreHome(env), "bin", "core"); }
+export function coreBinary(env = process.env) { return env.HARNESS_CORE_BIN || path.join(coreHome(env), "bin", "core"); }
 
-export function coreLibraryPath(env = process.env) { return env.PI_HARNESS_CORE_JS || path.join(coreHome(env), "js", "core.mjs"); }
+export function coreLibraryPath(env = process.env) { return env.HARNESS_CORE_JS || path.join(coreHome(env), "js", "core.mjs"); }
 
 /**
  * The flags every core of these sessions runs with: instructions from the agent folder
  * (`--agent-dir`), sign-ins and catalog from the core home, the models file when there is
- * one, then PI_HARNESS_CORE_ARGS (a JSON list). A flag given there replaces the default.
+ * one, then HARNESS_CORE_ARGS (a JSON list). A flag given there replaces the default.
  */
 export function coreArgs(env = process.env) {
-  const extra = env.PI_HARNESS_CORE_ARGS ? JSON.parse(env.PI_HARNESS_CORE_ARGS) : [];
-  if (!Array.isArray(extra) || extra.some((value) => typeof value !== "string")) throw new Error("PI_HARNESS_CORE_ARGS must be a JSON list of strings");
+  const extra = env.HARNESS_CORE_ARGS ? JSON.parse(env.HARNESS_CORE_ARGS) : [];
+  if (!Array.isArray(extra) || extra.some((value) => typeof value !== "string")) throw new Error("HARNESS_CORE_ARGS must be a JSON list of strings");
   const home = coreHome(env);
   const models = path.join(home, "models.json");
   const defaults = [["--agent-dir", agentDirectory(env)], ["--auth", path.join(home, "auth.json")], ["--catalog", path.join(home, "catalog")],

@@ -30,7 +30,7 @@ async function orphanedWriter(t, rootId, file) {
   const source = `const {spawn}=require('node:child_process');
     const child=spawn(process.execPath,['-e',${JSON.stringify("const fs=require('node:fs');setInterval(()=>fs.appendFileSync(process.argv[1],'x'),20)")},${JSON.stringify(file)}],
       {detached:true,env:process.env,stdio:'ignore'});child.unref();console.log(child.pid);`;
-  const leader = spawn(process.execPath, ["-e", source], { env: { ...process.env, PI_HARNESS_ROOT_SESSION_ID: rootId }, stdio: ["ignore", "pipe", "ignore"] });
+  const leader = spawn(process.execPath, ["-e", source], { env: { ...process.env, HARNESS_ROOT_SESSION_ID: rootId }, stdio: ["ignore", "pipe", "ignore"] });
   const leaderExited = once(leader, "exit");
   const [data] = await once(leader.stdout, "data"), pid = Number(data.toString().trim());
   await leaderExited;
@@ -61,8 +61,8 @@ test("canonical root path is shared through grandchildren and survives stop, rev
   for (const session of [tree.root, tree.child, tree.grandchild]) {
     const context = ensureSessionScratch(f.supervisor.store, session.sessionId, f.supervisor.scratchDirectory);
     assert.deepEqual(context, { rootSessionId: tree.root.sessionId, directory: rootPath });
-    assert.equal(f.actors.get(session.sessionId).env.PI_HARNESS_SCRATCH_DIRECTORY, rootPath);
-    assert.equal(f.actors.get(session.sessionId).env.PI_HARNESS_ROOT_SESSION_ID, tree.root.sessionId);
+    assert.equal(f.actors.get(session.sessionId).env.HARNESS_SCRATCH_DIRECTORY, rootPath);
+    assert.equal(f.actors.get(session.sessionId).env.HARNESS_ROOT_SESSION_ID, tree.root.sessionId);
   }
   assert.notEqual(rootPath, otherPath);
   const actorClient = await f.actorClient(tree.root);
@@ -96,7 +96,7 @@ test("missing owned scratch is recreated for the family and reused on revival", 
   await f.client.request("revive_session", { sessionId: root.sessionId });
   await until(() => f.actors.get(root.sessionId)?.isRunning);
   assert.deepEqual(store.getRootScratch(root.sessionId), after);
-  assert.equal(f.actors.get(root.sessionId).env.PI_HARNESS_SCRATCH_DIRECTORY, rootPath);
+  assert.equal(f.actors.get(root.sessionId).env.HARNESS_SCRATCH_DIRECTORY, rootPath);
 });
 
 test("missing scratch recovery rejects unavailable sessions and invalid ownership", async t => {
@@ -354,11 +354,11 @@ test("inherited service marker does not hold cleanup, but a matching external wr
   store.createRoot({ sessionId: rootId, cwd: dir, name: "Disposable service marker", actorToken: "fixture-only", launch: {} });
   const scratch = ensureSessionScratch(store, rootId, base);
   store.deleteSession(rootId); store.close();
-  const writer = await heldProcess(t, { PI_HARNESS_ROOT_SESSION_ID: rootId });
-  const env = { ...process.env, HOME: path.join(dir, "home"), PI_CODING_AGENT_DIR: path.join(dir, "agent"),
-    PI_HARNESS_ROOT_SESSION_ID: rootId, PI_HARNESS_SCRATCH_ROOT: base, PI_HARNESS_ACTOR_EXTENSIONS: "[]",
-    PI_HARNESS_SKILLS_PATH: path.resolve(import.meta.dirname, "../skills"), PI_HARNESS_BACKGROUND_COMPLETION_TICK_MS: "100" };
-  for (const key of ["PI_HARNESS_ACTOR_ID", "PI_HARNESS_ACTOR_TOKEN", "PI_HARNESS_ACTOR_GENERATION", "PI_HARNESS_ACTOR_SKILL_GRANT", "PI_HARNESS_SCRATCH_DIRECTORY"]) delete env[key];
+  const writer = await heldProcess(t, { HARNESS_ROOT_SESSION_ID: rootId });
+  const env = { ...process.env, HOME: path.join(dir, "home"), HARNESS_DIR: path.join(dir, "agent"),
+    HARNESS_ROOT_SESSION_ID: rootId, HARNESS_SCRATCH_ROOT: base, HARNESS_ACTOR_EXTENSIONS: "[]",
+    HARNESS_SKILLS_PATH: path.resolve(import.meta.dirname, "../skills"), HARNESS_BACKGROUND_COMPLETION_TICK_MS: "100" };
+  for (const key of ["HARNESS_ACTOR_ID", "HARNESS_ACTOR_TOKEN", "HARNESS_ACTOR_GENERATION", "HARNESS_ACTOR_SKILL_GRANT", "HARNESS_SCRATCH_DIRECTORY"]) delete env[key];
   const daemon = spawn(process.execPath, [path.resolve(import.meta.dirname, "../bin/harness-supervisor.mjs"), "start", "--socket", socketPath,
     "--db", databasePath, "--pid", pidPath], { env, stdio: "ignore" });
   const exited = once(daemon, "exit");

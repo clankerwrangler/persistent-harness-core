@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 test("operations.memory bounded Linux accounting fixtures", { timeout: 180000 }, () => {
-  const result = spawnSync(process.env.PI_HARNESS_PYTHON || "python3", ["-B", fileURLToPath(new URL("./operations-memory.py", import.meta.url))], {
+  const result = spawnSync(process.env.HARNESS_PYTHON || "python3", ["-B", fileURLToPath(new URL("./operations-memory.py", import.meta.url))], {
     encoding: "utf8", timeout: 120_000, maxBuffer: 64 * 1024,
   });
   assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout);

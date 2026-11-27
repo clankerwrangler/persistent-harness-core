@@ -66,10 +66,10 @@ async function fixture(t, { maxFrameBytes } = {}) {
   const saved = { ...process.env }, clients = [], sockets = [], gates = [], actors = new Map();
   let supervisor;
   for (const key of Object.keys(process.env)) delete process.env[key];
-  Object.assign(process.env, { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: path.join(root, "home"), PI_CODING_AGENT_DIR: path.join(root, "agent"),
-    PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_HARNESS_AUTO_INSTALL: "0",
+  Object.assign(process.env, { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: path.join(root, "home"), HARNESS_DIR: path.join(root, "agent"),
+    PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", HARNESS_AUTO_INSTALL: "0",
     ...Object.fromEntries(["NODE_TEST_CONTEXT"].filter(key => saved[key]).map(key => [key, saved[key]])) });
-  await Promise.all([mkdir(process.env.HOME), mkdir(process.env.PI_CODING_AGENT_DIR), mkdir(path.join(root, "skills"))]);
+  await Promise.all([mkdir(process.env.HOME), mkdir(process.env.HARNESS_DIR), mkdir(path.join(root, "skills"))]);
   t.after(async () => {
     for (const gate of gates) gate.release.resolve();
     for (const socket of sockets) socket.destroy();

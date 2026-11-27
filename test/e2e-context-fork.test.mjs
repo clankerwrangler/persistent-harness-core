@@ -83,7 +83,7 @@ test("optional context forks preserve first-turn history with fresh kernels and 
   const root = await mkdtemp(path.join(os.tmpdir(), "harness-context-fork-e2e-"));
   const agentDir = path.join(root, "agent");
   const cwd = path.join(root, "project");
-  const previous = new Map(["PI_CODING_AGENT_DIR", "PI_HARNESS_CORE_ARGS", "PI_HARNESS_CORE_SESSIONS", "PI_HARNESS_AUTO_INSTALL"].map((key) => [key, process.env[key]]));
+  const previous = new Map(["HARNESS_DIR", "HARNESS_CORE_ARGS", "HARNESS_CORE_SESSIONS", "HARNESS_AUTO_INSTALL"].map((key) => [key, process.env[key]]));
   let supervisor;
   let client;
   const bodies = [];
@@ -159,8 +159,8 @@ test("optional context forks preserve first-turn history with fresh kernels and 
     writeFile(path.join(agentDir, "AGENTS.depth-1.md"), "FORK_DEPTH_ONE_INSTRUCTION"),
     writeFile(path.join(agentDir, "AGENTS.depth-2.md"), "FORK_DEPTH_TWO_INSTRUCTION"),
   ]);
-  process.env.PI_CODING_AGENT_DIR = agentDir;
-  process.env.PI_HARNESS_AUTO_INSTALL ??= "0";
+  process.env.HARNESS_DIR = agentDir;
+  process.env.HARNESS_AUTO_INSTALL ??= "0";
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   Object.assign(process.env, await coreFakeProvider(root, `http://127.0.0.1:${server.address().port}/v1`,
     { provider: "harness-fork-fake", models: ["parent-model", "pinned-child-model"], agentDir }));

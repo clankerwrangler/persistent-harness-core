@@ -6,8 +6,8 @@ import { PythonRuntimeManager } from "../src/python-runtime.mjs";
 import { discoverSkillsFromDirectory } from "../src/skills.mjs";
 
 const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
-let skillsPath = process.env.PI_HARNESS_SKILLS_PATH || path.resolve(packageRoot, "skills");
+const agentDir = process.env.HARNESS_DIR || path.join(os.homedir(), ".harness");
+let skillsPath = process.env.HARNESS_SKILLS_PATH || path.resolve(packageRoot, "skills");
 let runtimeDir = path.join(agentDir, "harness", "kernel-runtime");
 let approved = false;
 for (let index = 2; index < process.argv.length; index += 1) {

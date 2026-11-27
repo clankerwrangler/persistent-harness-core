@@ -15,7 +15,7 @@ async function commandsForBuiltins(extra = []) {
   return [
     ...names.map((name) => ({
       source: "skill",
-      path: path.join(process.env.PI_HARNESS_SKILLS_PATH || path.join(packageRoot, "skills"), name, "SKILL.md"),
+      path: path.join(process.env.HARNESS_SKILLS_PATH || path.join(packageRoot, "skills"), name, "SKILL.md"),
     })),
     ...extra,
   ];
@@ -30,8 +30,8 @@ test("persistent kernel exposes unified skill help, host-backed calls, interrupt
   const kernels = [];
   // Keep managed reuse/rebuild checks separate from the external-interpreter override.
   // An explicit offline seed supplies only cached tool/interpreter/package prerequisites.
-  if (process.env.PI_HARNESS_TEST_MANAGED_SEED) {
-    await cp(process.env.PI_HARNESS_TEST_MANAGED_SEED, path.join(root, "runtime"), { recursive: true });
+  if (process.env.HARNESS_TEST_MANAGED_SEED) {
+    await cp(process.env.HARNESS_TEST_MANAGED_SEED, path.join(root, "runtime"), { recursive: true });
     process.env.UV_OFFLINE = "1";
     t.mock.method(globalThis, "fetch", () => { throw new Error("managed runtime fixture forbids network downloads"); });
   }

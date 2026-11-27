@@ -28,7 +28,7 @@ class Actor extends EventEmitter {
 export async function deletionFixture(t, options = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "recursive-session-delete-"));
   await mkdir(path.join(dir, "skills")); await mkdir(path.join(dir, "agent"));
-  const oldAgent = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = path.join(dir, "agent");
+  const oldAgent = process.env.HARNESS_DIR; process.env.HARNESS_DIR = path.join(dir, "agent");
   const fixture = { dir, actors: new Map(), clients: [], closeOrder: [], errors: [] };
   const socketPath = path.join(dir, "run", "supervisor.sock");
   fixture.supervisor = new HarnessSupervisor({ socketPath, databasePath: path.join(dir, "state", "harness.sqlite"),
@@ -44,7 +44,7 @@ export async function deletionFixture(t, options = {}) {
     fixture.closeGate = null; fixture.startGate = null; fixture.identityGate = null;
     for (const actor of fixture.actors.values()) actor.failClose = false;
     await Promise.all(fixture.clients.map(client => client.stop())); await fixture.supervisor.stop();
-    if (oldAgent === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldAgent;
+    if (oldAgent === undefined) delete process.env.HARNESS_DIR; else process.env.HARNESS_DIR = oldAgent;
     await rm(dir, { recursive: true, force: true });
   });
   await fixture.supervisor.start();

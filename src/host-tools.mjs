@@ -285,8 +285,8 @@ export async function runShell(payload, { cwd, scratch, signal, onProgress = () 
   return new Promise((resolve, reject) => {
     const child = spawn("/usr/bin/perl", ["-e", SHELL_SUBREAPER, "--", "/bin/bash", "-lc", command], {
       cwd: commandCwd,
-      env: { ...process.env, ...(scratch ? { PI_HARNESS_ROOT_SESSION_ID: scratch.rootSessionId,
-        PI_HARNESS_SCRATCH_DIRECTORY: scratch.directory } : {}) },
+      env: { ...process.env, ...(scratch ? { HARNESS_ROOT_SESSION_ID: scratch.rootSessionId,
+        HARNESS_SCRATCH_DIRECTORY: scratch.directory } : {}) },
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
     });

@@ -2,7 +2,7 @@
 // speaking the Responses API over plain HTTP streaming (the core falls back to it when it
 // cannot open a WebSocket). `script({ response, body, index, send, item, done })` answers
 // each model request; it may hold the response open. Needs a Python runtime
-// (PI_HARNESS_PYTHON) for the ipython tool. `nativeAsync` turns on native asynchronous Python calls
+// (HARNESS_PYTHON) for the ipython tool. `nativeAsync` turns on native asynchronous Python calls
 // (a call the provider marks `async: true` does not hold up the next request).
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -28,10 +28,10 @@ function fakeCodexToken(account) {
   return `${part({ alg: "none" })}.${part({ "https://api.openai.com/auth": { chatgpt_account_id: account } })}.fixture`;
 }
 
-const ENV = ["PI_CODING_AGENT_DIR", "PI_HARNESS_CORE_ARGS", "PI_HARNESS_CORE_SESSIONS", "PI_HARNESS_AUTO_INSTALL", "PI_HARNESS_NATIVE_ASYNC"];
+const ENV = ["HARNESS_DIR", "HARNESS_CORE_ARGS", "HARNESS_CORE_SESSIONS", "HARNESS_AUTO_INSTALL", "HARNESS_NATIVE_ASYNC"];
 
 export async function coreLiveFixture(t, name, script, { models = ["gpt-6-astra"], maxRequests = 2, nativeAsync = false, shippedModels = false, refreshedCatalog = false } = {}) {
-  assert(process.env.PI_HARNESS_PYTHON, "the core live fixture needs a Python runtime (PI_HARNESS_PYTHON)");
+  assert(process.env.HARNESS_PYTHON, "the core live fixture needs a Python runtime (HARNESS_PYTHON)");
   const directory = await mkdtemp(path.join(os.tmpdir(), "core-live-"));
   const cwd = path.join(directory, "project"), coreDir = path.join(directory, "core"), agentDir = path.join(directory, "agent");
   await Promise.all([mkdir(cwd), mkdir(coreDir), mkdir(agentDir)]);
@@ -74,7 +74,7 @@ export async function coreLiveFixture(t, name, script, { models = ["gpt-6-astra"
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   // For the catalog integration test, use the actual shipped entries, changing only
   // the endpoint to the local fake provider. Never hand-author their capabilities.
-  const shipped = shippedModels ? JSON.parse(await readFile(process.env.PI_HARNESS_CORE_MODELS, "utf8")).models : null;
+  const shipped = shippedModels ? JSON.parse(await readFile(process.env.HARNESS_CORE_MODELS, "utf8")).models : null;
   const definitions = Object.fromEntries(models.map((id) => [id, shipped
     ? { ...shipped[id], baseUrl }
     : { provider: "openai-codex", id, name: id, api: "openai-codex-responses", baseUrl,
@@ -96,13 +96,13 @@ export async function coreLiveFixture(t, name, script, { models = ["gpt-6-astra"
   await writeFile(auth, JSON.stringify({ "openai-codex": { type: "oauth", access: fakeCodexToken("fixture-account"), refresh: "fixture-refresh",
     expires: Date.now() + 365 * 24 * 3600_000, accountId: "fixture-account" } }), { mode: 0o600 });
   Object.assign(process.env, {
-    PI_CODING_AGENT_DIR: agentDir, PI_HARNESS_AUTO_INSTALL: "0", PI_HARNESS_NATIVE_ASYNC: nativeAsync ? "1" : "0", PI_HARNESS_CORE_SESSIONS: path.join(coreDir, "sessions"),
-    PI_HARNESS_CORE_ARGS: JSON.stringify(["--models", modelsFile, "--auth", auth, "--catalog", path.join(coreDir, "catalog"), "--agent-dir", agentDir]),
+    HARNESS_DIR: agentDir, HARNESS_AUTO_INSTALL: "0", HARNESS_NATIVE_ASYNC: nativeAsync ? "1" : "0", HARNESS_CORE_SESSIONS: path.join(coreDir, "sessions"),
+    HARNESS_CORE_ARGS: JSON.stringify(["--models", modelsFile, "--auth", auth, "--catalog", path.join(coreDir, "catalog"), "--agent-dir", agentDir]),
   });
   const socketPath = path.join(directory, "run", "supervisor.sock");
   supervisor = new HarnessSupervisor({ socketPath, databasePath: path.join(directory, "state", "harness.sqlite"),
     pidPath: path.join(directory, "run", "supervisor.pid"), backgroundJobsDirectory: path.join(agentDir, "state", "background-jobs"),
-    skillsPath: process.env.PI_HARNESS_SKILLS_PATH ?? path.resolve(import.meta.dirname, "../../skills"), actorInactivityMs: 0 });
+    skillsPath: process.env.HARNESS_SKILLS_PATH ?? path.resolve(import.meta.dirname, "../../skills"), actorInactivityMs: 0 });
   await supervisor.start();
   client = new HarnessClient({ requestTimeoutMs: 120_000, socketPath, heartbeatMs: 0 });
   await client.start({ registrationType: "register_client", clientInstanceId: randomUUID() });

@@ -1053,8 +1053,8 @@ test("existing root actors reconcile additions, hashes, removals, and invalid pa
   await eventually(() => actors.get(id)?.[0]?.actor.isRunning);
   assert.deepEqual(supervisor.store.getSessionSkillGrant(id).skills.map((skill) => skill.id), ["alpha"]);
   const first = actors.get(id)[0];
-  assert.equal(first.options.env.PI_HARNESS_ACTOR_SKILL_GRANT.endsWith(".skill-grant.json"), true);
-  assert.deepEqual(JSON.parse(await readFile(first.options.env.PI_HARNESS_ACTOR_SKILL_GRANT, "utf8")).skills.map((skill) => skill.id), ["alpha"]);
+  assert.equal(first.options.env.HARNESS_ACTOR_SKILL_GRANT.endsWith(".skill-grant.json"), true);
+  assert.deepEqual(JSON.parse(await readFile(first.options.env.HARNESS_ACTOR_SKILL_GRANT, "utf8")).skills.map((skill) => skill.id), ["alpha"]);
 
   await writeGuidanceSkill(skillsPath, "beta", "Beta skill.");
   await client.request("submit_input", { sessionId: id, message: "use beta", behavior: "auto", clientRequestId: "skills-1" });
@@ -1194,11 +1194,11 @@ test("first assistant message starts a title while tool work stays active and le
   const socketPath = path.join(root, "run", "supervisor.sock");
   const actors = new Map();
   const skillsPath = path.join(root, "skills"); await mkdir(skillsPath);
-  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-  process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
+  const previousAgentDir = process.env.HARNESS_DIR;
+  process.env.HARNESS_DIR = path.join(root, "agent");
   t.after(() => {
-    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    if (previousAgentDir === undefined) delete process.env.HARNESS_DIR;
+    else process.env.HARNESS_DIR = previousAgentDir;
   });
   const userText = "I want depth 0 sessions to be renamed automatically.";
   const assistantText = "I will trace the session-title path before running the long checks.";
@@ -1638,7 +1638,7 @@ test("working actors remain resident and settled actors still passivate after st
 class OriginalRetryActor extends RetryPiActor {
   constructor(options) { super(options); this.env = options.env; this.args = options.args; this.internal = []; }
   async start() {
-    this.control = new HarnessClient({ requestTimeoutMs: 120_000, socketPath: this.env.PI_HARNESS_SOCKET, heartbeatMs: 0 });
+    this.control = new HarnessClient({ requestTimeoutMs: 120_000, socketPath: this.env.HARNESS_SOCKET, heartbeatMs: 0 });
     await this.control.start({ registrationType: "register_actor", sessionId: this.session.sessionId, sessionFile: this.session.sessionFile,
       cwd: this.session.cwd, repositoryRoot: this.session.repositoryRoot, actorToken: this.session.actorToken, actorGeneration: this.session.actorGeneration });
     return super.start();
@@ -1900,7 +1900,7 @@ test("supervisor shares one private compile cache and drains workers and pending
   const started = Promise.withResolvers(), exited = Promise.withResolvers(); const actors = [];
   let closeCalls = 0, stopped = false;
   class HeldCacheActor extends FakePiActor {
-    constructor(options) { super(options); this.cache = options.env.PI_HARNESS_ACTOR_COMPILE_CACHE;
+    constructor(options) { super(options); this.cache = options.env.HARNESS_ACTOR_COMPILE_CACHE;
       assert.equal(options.env.NODE_COMPILE_CACHE, undefined); actors.push(this); }
     async start() { this.isRunning = true; await started.promise;
       return { sessionId: this.session.sessionId, sessionFile: this.session.sessionFile, isStreaming: false, model: null, thinkingLevel: "off" }; }
@@ -1993,7 +1993,7 @@ async function artifactGenerationSupervisor(t, factory) {
   await supervisor.start(); t.after(async () => { await supervisor.stop(); await rm(root, { recursive: true, force: true }); });
   const client = new HarnessClient({ requestTimeoutMs: 120_000, socketPath, heartbeatMs: 0 });
   await client.start({ registrationType: "register_client", clientInstanceId: "artifact-generations" }); t.after(() => client.stop());
-  const snapshot = index => readFile(actors[index].options.env.PI_HARNESS_ACTOR_SKILL_GRANT, "utf8").then(JSON.parse);
+  const snapshot = index => readFile(actors[index].options.env.HARNESS_ACTOR_SKILL_GRANT, "utf8").then(JSON.parse);
   return { root, skillsPath, socketPath, actors, supervisor, client, snapshot };
 }
 
@@ -2007,9 +2007,9 @@ test("artifact generation busy continuity, idle refresh, build-only identity and
   const created = await admitFauxSkillRoot(f.supervisor, f.client, f.root, "Artifact continuity"), id = created.admission.sessionId;
   await eventually(() => f.actors[0]?.actor.isRunning);
   const first = f.actors[0], admitted = await f.snapshot(0), oldPath = admitted.skills[0].skillPath;
-  const grantBytes = await readFile(first.options.env.PI_HARNESS_ACTOR_SKILL_GRANT, "utf8");
-  assert.notEqual(first.options.env.PI_HARNESS_ACTOR_SKILL_GRANT, sessionSidecarPaths(first.options.session.sessionFile).skillGrantPath);
-  assert.equal((await lstat(first.options.env.PI_HARNESS_ACTOR_SKILL_GRANT)).mode & 0o777, 0o400);
+  const grantBytes = await readFile(first.options.env.HARNESS_ACTOR_SKILL_GRANT, "utf8");
+  assert.notEqual(first.options.env.HARNESS_ACTOR_SKILL_GRANT, sessionSidecarPaths(first.options.session.sessionFile).skillGrantPath);
+  assert.equal((await lstat(first.options.env.HARNESS_ACTOR_SKILL_GRANT)).mode & 0o777, 0o400);
   first.actor.emit("event", { type: "agent_start" });
   await eventually(() => f.supervisor.store.getSession(id).activity === "working");
   await writeGuidanceSkill(f.skillsPath, "alpha", "Second desired bytes.");
@@ -2018,7 +2018,7 @@ test("artifact generation busy continuity, idle refresh, build-only identity and
   await eventually(() => first.actor.submits.some(item => item.message.includes("while busy")));
   assert.equal(f.actors.length, 1, "busy generation is not replaced");
   assert.match(await readFile(oldPath, "utf8"), /First admitted bytes/);
-  assert.equal(await readFile(first.options.env.PI_HARNESS_ACTOR_SKILL_GRANT, "utf8"), grantBytes);
+  assert.equal(await readFile(first.options.env.HARNESS_ACTOR_SKILL_GRANT, "utf8"), grantBytes);
   const actorClient = new HarnessClient({ requestTimeoutMs: 120_000, socketPath: f.socketPath, heartbeatMs: 0 }); t.after(() => actorClient.stop());
   await actorClient.start({ registrationType: "register_actor", sessionId: id, sessionFile: first.options.session.sessionFile,
     cwd: f.root, repositoryRoot: null, actorToken: first.options.session.actorToken, actorGeneration: first.options.session.actorGeneration });
@@ -2058,7 +2058,7 @@ test("artifact generation blocked startup cannot read a newly reconciled desired
     constructor(options) { super(options); this.options = options; }
     async start() {
       entered.resolve(); await release.promise;
-      this.loadedGrant = JSON.parse(await readFile(this.options.env.PI_HARNESS_ACTOR_SKILL_GRANT, "utf8"));
+      this.loadedGrant = JSON.parse(await readFile(this.options.env.HARNESS_ACTOR_SKILL_GRANT, "utf8"));
       return super.start();
     }
   }
@@ -2066,7 +2066,7 @@ test("artifact generation blocked startup cannot read a newly reconciled desired
   const admission = admitFauxSkillRoot(f.supervisor, f.client, f.root, "Paused artifact startup");
   await entered.promise;
   const first = f.actors[0], id = first.options.session.sessionId;
-  const original = await f.snapshot(0), originalBytes = await readFile(first.options.env.PI_HARNESS_ACTOR_SKILL_GRANT, "utf8");
+  const original = await f.snapshot(0), originalBytes = await readFile(first.options.env.HARNESS_ACTOR_SKILL_GRANT, "utf8");
   await writeGuidanceSkill(f.skillsPath, "alpha", "Updated during paused startup.");
   const input = f.client.request("submit_input", { sessionId: id, message: "during startup", behavior: "auto", clientRequestId: "artifact-startup-race" });
   await eventually(() => f.supervisor.store.getSessionSkillGrant(id).skills[0].skillPath !== original.skills[0].skillPath);
@@ -2075,7 +2075,7 @@ test("artifact generation blocked startup cannot read a newly reconciled desired
     return value.skills[0].skillPath !== original.skills[0].skillPath ? value : null;
   });
   assert.notEqual(desired.skills[0].skillPath, original.skills[0].skillPath, "negative control: mutable desired path really changed");
-  assert.equal(await readFile(first.options.env.PI_HARNESS_ACTOR_SKILL_GRANT, "utf8"), originalBytes);
+  assert.equal(await readFile(first.options.env.HARNESS_ACTOR_SKILL_GRANT, "utf8"), originalBytes);
   release.resolve(); await admission; await input;
   await eventually(() => first.actor.loadedGrant);
   assert.deepEqual(first.actor.loadedGrant, original);
@@ -2203,7 +2203,7 @@ class EarlyRegisteringActor extends FakePiActor {
   constructor(options) { super(options); this.env = options.env; this.deliveries = []; }
   async start() {
     // Pi registers from session_start, before the worker reports ready and the session becomes resident.
-    this.control = new HarnessClient({ requestTimeoutMs: 120_000, socketPath: this.env.PI_HARNESS_SOCKET, heartbeatMs: 0 });
+    this.control = new HarnessClient({ requestTimeoutMs: 120_000, socketPath: this.env.HARNESS_SOCKET, heartbeatMs: 0 });
     this.control.on("event", frame => { if (frame.event === "message_available") this.deliveries.push(frame.data.message); });
     await this.control.start({ registrationType: "register_actor", sessionId: this.session.sessionId, sessionFile: this.session.sessionFile,
       cwd: this.session.cwd, repositoryRoot: this.session.repositoryRoot, actorToken: this.session.actorToken, actorGeneration: this.session.actorGeneration });

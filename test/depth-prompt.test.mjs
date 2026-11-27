@@ -50,19 +50,19 @@ test("a depth folder loads its Markdown files after the depth file in name order
   await writeFile(path.join(root, "AGENTS.depth-0.md"), "ROOT FILE");
   const folder = path.join(root, "AGENTS.depth-0.d");
   await mkdir(folder);
-  await writeFile(path.join(folder, "flagship.md"), "FLAGSHIP");
+  await writeFile(path.join(folder, "example.md"), "EXAMPLE");
   await writeFile(path.join(folder, "persona.md"), "PERSONA");
   await writeFile(path.join(folder, "notes.txt"), "IGNORED");
   const rootPrompt = await loadDepthPrompt([globalContext], 0);
   assert.deepEqual(rootPrompt.files.map((file) => path.relative(root, file.path)), [
     "AGENTS.depth-0.md",
-    path.join("AGENTS.depth-0.d", "flagship.md"),
+    path.join("AGENTS.depth-0.d", "example.md"),
     path.join("AGENTS.depth-0.d", "persona.md"),
   ]);
   assert.doesNotMatch(rootPrompt.prompt, /IGNORED/);
   await rm(path.join(root, "AGENTS.depth-0.md"));
   const folderOnly = await loadDepthPrompt([globalContext], 0);
-  assert.deepEqual(folderOnly.files.map((file) => file.content), ["FLAGSHIP", "PERSONA"]);
+  assert.deepEqual(folderOnly.files.map((file) => file.content), ["EXAMPLE", "PERSONA"]);
   assert.equal((await loadDepthPrompt([globalContext], 1)).prompt, "");
 });
 
@@ -87,7 +87,7 @@ const defaultBasePrompt = [
   PI_DEFAULT_BE_CONCISE_GUIDELINE,
   "- Show file paths clearly when working with files",
   "",
-  "<project_instructions path=\"/home/example/.pi/agent/AGENTS.md\">",
+  "<project_instructions path=\"/home/example/.harness/AGENTS.md\">",
   "# Problem-Solving Principles",
   "</project_instructions>",
 ].join("\n");

@@ -15,7 +15,7 @@ import { actorInputCustomPayload } from "../src/protocol.mjs";
 class FakeActor extends EventEmitter {
   constructor(options) { super(); this.session = options.session; this.env = options.env; this.pid = process.pid; this.isRunning = false; this.submits = []; this.connection = null; }
   async start() {
-    this.connection = new HarnessClient({ requestTimeoutMs: 120_000, socketPath: this.env.PI_HARNESS_SOCKET, heartbeatMs: 0 });
+    this.connection = new HarnessClient({ requestTimeoutMs: 120_000, socketPath: this.env.HARNESS_SOCKET, heartbeatMs: 0 });
     await this.connection.start({ registrationType: "register_actor", sessionId: this.session.sessionId, sessionFile: this.session.sessionFile,
       cwd: this.session.cwd, repositoryRoot: this.session.repositoryRoot, actorToken: this.session.actorToken, actorGeneration: this.session.actorGeneration });
     this.isRunning = true;
@@ -82,7 +82,7 @@ test("Python background launch reaches the owning actor as one durable automatic
     if (message) waiting.push(message);
   });
   await client.request("subscribe_session", { selector: "owner", passive: true });
-  const { stdout } = await promisify(execFile)(process.env.PI_HARNESS_PYTHON || "python3", ["-c", `
+  const { stdout } = await promisify(execFile)(process.env.HARNESS_PYTHON || "python3", ["-c", `
 import asyncio, json
 import harness_background
 print(json.dumps(asyncio.run(harness_background.run(
@@ -92,9 +92,9 @@ print(json.dumps(asyncio.run(harness_background.run(
     env: {
       PATH: process.env.PATH,
       HOME: root,
-      PI_CODING_AGENT_DIR: agentDirectory,
-      PI_HARNESS_ACTOR_ID: "owner",
-      PYTHONPATH: path.join(process.env.PI_HARNESS_SKILLS_PATH || path.resolve(import.meta.dirname, "../skills"), "background", "src"),
+      HARNESS_DIR: agentDirectory,
+      HARNESS_ACTOR_ID: "owner",
+      PYTHONPATH: path.join(process.env.HARNESS_SKILLS_PATH || path.resolve(import.meta.dirname, "../skills"), "background", "src"),
       PYTHONDONTWRITEBYTECODE: "1",
     },
     timeout: 120_000,

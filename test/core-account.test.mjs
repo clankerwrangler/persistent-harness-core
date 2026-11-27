@@ -23,36 +23,36 @@ else if (mode === "refused") { console.log(JSON.stringify({ error: "device code 
 else if (mode === "hang") { console.log(JSON.stringify({ step: "device_code", url: "https://example.test/device", code: "WXYZ-0000", expiresIn: 900 })); setInterval(() => {}, 1000); }
 `.replace(/^#!.*\n/, "#!/usr/bin/env node\n"));
   await chmod(bin, 0o755);
-  const env = (mode, extra = {}) => ({ ...process.env, PI_HARNESS_CORE_BIN: bin, FAKE_MODE: mode, ...extra });
+  const env = (mode, extra = {}) => ({ ...process.env, HARNESS_CORE_BIN: bin, FAKE_MODE: mode, ...extra });
   return { env, args: async () => JSON.parse(await readFile(path.join(dir, "args.json"), "utf8")) };
 }
 
 test("the sessions' credentials file is passed on; none means the agent folder's core/auth.json", () => {
-  assert.deepEqual(coreAuthArgs({ PI_HARNESS_CORE_ARGS: JSON.stringify(["--models", "m.json", "--auth", "/a/auth.json"]) }), ["--auth", "/a/auth.json"]);
-  assert.deepEqual(coreAuthArgs({ PI_CODING_AGENT_DIR: "/agent" }), ["--auth", path.resolve("/agent/core/auth.json")]);
-  assert.deepEqual(coreAuthArgs({ PI_HARNESS_CORE_ARGS: "not json" }), []);
+  assert.deepEqual(coreAuthArgs({ HARNESS_CORE_ARGS: JSON.stringify(["--models", "m.json", "--auth", "/a/auth.json"]) }), ["--auth", "/a/auth.json"]);
+  assert.deepEqual(coreAuthArgs({ HARNESS_DIR: "/agent" }), ["--auth", path.resolve("/agent/core/auth.json")]);
+  assert.deepEqual(coreAuthArgs({ HARNESS_CORE_ARGS: "not json" }), []);
 });
 
 test("every core runs with the agent folder's instructions and the core home's sign-ins and catalog", async (t) => {
   const agent = await mkdtemp(path.join(os.tmpdir(), "core-args-"));
   t.after(() => rm(agent, { recursive: true, force: true }));
   const home = path.join(agent, "core");
-  assert.deepEqual(coreArgs({ PI_CODING_AGENT_DIR: agent }),
+  assert.deepEqual(coreArgs({ HARNESS_DIR: agent }),
     ["--agent-dir", agent, "--auth", path.join(home, "auth.json"), "--catalog", path.join(home, "catalog")]);
   await mkdir(home); await writeFile(path.join(home, "models.json"), '{"models": {}}');
-  assert.deepEqual(coreArgs({ PI_CODING_AGENT_DIR: agent }).slice(-2), ["--models", path.join(home, "models.json")]);
-  // A flag given in PI_HARNESS_CORE_ARGS replaces its default instead of repeating it.
-  assert.deepEqual(coreArgs({ PI_CODING_AGENT_DIR: agent, PI_HARNESS_CORE_ARGS: JSON.stringify(["--auth", "/a/auth.json"]) }),
+  assert.deepEqual(coreArgs({ HARNESS_DIR: agent }).slice(-2), ["--models", path.join(home, "models.json")]);
+  // A flag given in HARNESS_CORE_ARGS replaces its default instead of repeating it.
+  assert.deepEqual(coreArgs({ HARNESS_DIR: agent, HARNESS_CORE_ARGS: JSON.stringify(["--auth", "/a/auth.json"]) }),
     ["--agent-dir", agent, "--catalog", path.join(home, "catalog"), "--models", path.join(home, "models.json"), "--auth", "/a/auth.json"]);
-  assert.equal(coreBinary({ PI_CODING_AGENT_DIR: agent }), path.join(home, "bin", "core"));
-  assert.equal(coreLibraryPath({ PI_CODING_AGENT_DIR: agent }), path.join(home, "js", "core.mjs"));
-  assert.equal(coreSessionsDirectory({ PI_CODING_AGENT_DIR: agent }), path.join(home, "sessions"));
-  assert.throws(() => coreArgs({ PI_HARNESS_CORE_ARGS: '["--auth", 1]' }), /JSON list of strings/);
+  assert.equal(coreBinary({ HARNESS_DIR: agent }), path.join(home, "bin", "core"));
+  assert.equal(coreLibraryPath({ HARNESS_DIR: agent }), path.join(home, "js", "core.mjs"));
+  assert.equal(coreSessionsDirectory({ HARNESS_DIR: agent }), path.join(home, "sessions"));
+  assert.throws(() => coreArgs({ HARNESS_CORE_ARGS: '["--auth", 1]' }), /JSON list of strings/);
 });
 
 test("remaining usage is asked of the core; a failing or garbled answer reads as unavailable", async (t) => {
   const fake = await fakeCore(t);
-  const auth = { PI_HARNESS_CORE_ARGS: JSON.stringify(["--auth", "/a/auth.json"]) };
+  const auth = { HARNESS_CORE_ARGS: JSON.stringify(["--auth", "/a/auth.json"]) };
   assert.deepEqual(await coreUsage("openai-codex", { env: fake.env("usage", auth) }),
     { provider: "openai-codex", model: null, status: "ready", remaining: { kind: "rate_limits", percentUsed: 40 } });
   assert.deepEqual(await fake.args(), ["usage", "openai-codex", "--auth", "/a/auth.json"]);

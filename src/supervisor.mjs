@@ -147,41 +147,41 @@ export class HarnessSupervisor {
     messageRateCapacity = 20,
     messageRateRefillPerSecond = 1,
     pendingMessageLimit = 100,
-    maxMessageDeliveryAttempts = Number(process.env.PI_HARNESS_MAX_MESSAGE_ATTEMPTS ?? 5),
-    maxDepth = Number(process.env.PI_HARNESS_MAX_DEPTH ?? 1),
-    maxResidentActors = Number(process.env.PI_HARNESS_MAX_RESIDENT_ACTORS ?? 8),
-    maxConcurrentStarts = Number(process.env.PI_HARNESS_MAX_CONCURRENT_STARTS ?? 2),
-    actorInactivityMs = Number(process.env.PI_HARNESS_ACTOR_INACTIVITY_MS ?? 10 * 60 * 1000),
-    configuredChildModel = process.env.PI_HARNESS_CHILD_MODEL || null,
-    configuredChildThinkingLevel = process.env.PI_HARNESS_CHILD_THINKING || null,
-    skillsPath = process.env.PI_HARNESS_SKILLS_PATH || DEFAULT_SKILLS_PATH,
+    maxMessageDeliveryAttempts = Number(process.env.HARNESS_MAX_MESSAGE_ATTEMPTS ?? 5),
+    maxDepth = Number(process.env.HARNESS_MAX_DEPTH ?? 1),
+    maxResidentActors = Number(process.env.HARNESS_MAX_RESIDENT_ACTORS ?? 8),
+    maxConcurrentStarts = Number(process.env.HARNESS_MAX_CONCURRENT_STARTS ?? 2),
+    actorInactivityMs = Number(process.env.HARNESS_ACTOR_INACTIVITY_MS ?? 10 * 60 * 1000),
+    configuredChildModel = process.env.HARNESS_CHILD_MODEL || null,
+    configuredChildThinkingLevel = process.env.HARNESS_CHILD_THINKING || null,
+    skillsPath = process.env.HARNESS_SKILLS_PATH || DEFAULT_SKILLS_PATH,
     runtimeDir = runtimeDirectory(agentDirectory()),
     runtimeProvisioner = null,
     actorFactory = (options) => new SessionProcess(options),
     transcriptReader = null,
     processIdentityFactory = captureOwnedProcessIdentity,
     processTerminator = terminateOwnedProcess,
-    actorStartupTimeoutMs = Number(process.env.PI_HARNESS_ACTOR_STARTUP_TIMEOUT_MS ?? 120_000),
-    actorPromptPreflightTimeoutMs = Number(process.env.PI_HARNESS_ACTOR_PROMPT_PREFLIGHT_TIMEOUT_MS ?? DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS),
-    actorShutdownTimeoutMs = Number(process.env.PI_HARNESS_ACTOR_SHUTDOWN_TIMEOUT_MS ?? 3000),
+    actorStartupTimeoutMs = Number(process.env.HARNESS_ACTOR_STARTUP_TIMEOUT_MS ?? 120_000),
+    actorPromptPreflightTimeoutMs = Number(process.env.HARNESS_ACTOR_PROMPT_PREFLIGHT_TIMEOUT_MS ?? DEFAULT_PROMPT_PREFLIGHT_TIMEOUT_MS),
+    actorShutdownTimeoutMs = Number(process.env.HARNESS_ACTOR_SHUTDOWN_TIMEOUT_MS ?? 3000),
     logger = console,
     logPath = path.join(path.dirname(databasePath), "events.jsonl"),
-    maxLogBytes = Number(process.env.PI_HARNESS_MAX_LOG_BYTES ?? 1024 * 1024),
+    maxLogBytes = Number(process.env.HARNESS_MAX_LOG_BYTES ?? 1024 * 1024),
     rootOutputProjector = new RootOutputProjector(),
     sessionHistoryIndex = null,
     sessionHistoryTimeoutMs = 25_000,
     sessionHistoryIndexFactory = (options) => new SessionHistoryIndex(options),
-    cronTickIntervalMs = Number(process.env.PI_HARNESS_CRON_TICK_MS ?? 60_000),
-    cronMaxParallel = Number(process.env.PI_HARNESS_CRON_MAX_PARALLEL ?? 2),
-    cronDefaultTimezone = process.env.PI_HARNESS_CRON_TIMEZONE || DEFAULT_CRON_TIMEZONE,
+    cronTickIntervalMs = Number(process.env.HARNESS_CRON_TICK_MS ?? 60_000),
+    cronMaxParallel = Number(process.env.HARNESS_CRON_MAX_PARALLEL ?? 2),
+    cronDefaultTimezone = process.env.HARNESS_CRON_TIMEZONE || DEFAULT_CRON_TIMEZONE,
     cronStoreFactory = (value, options) => new CronStore(value, options),
     cronSchedulerFactory = (options) => new CronScheduler(options),
-    inboxPort = process.env.PI_HARNESS_INBOX_PORT ? Number(process.env.PI_HARNESS_INBOX_PORT) : null,
+    inboxPort = process.env.HARNESS_INBOX_PORT ? Number(process.env.HARNESS_INBOX_PORT) : null,
     homeSessionPath = null,
-    inboxHost = process.env.PI_HARNESS_INBOX_HOST || "0.0.0.0",
+    inboxHost = process.env.HARNESS_INBOX_HOST || "0.0.0.0",
     backgroundJobsDirectory = defaultBackgroundJobsDirectory(),
-    scratchDirectory = process.env.PI_HARNESS_SCRATCH_ROOT || DEFAULT_SCRATCH_DIRECTORY,
-    backgroundCompletionIntervalMs = Number(process.env.PI_HARNESS_BACKGROUND_COMPLETION_TICK_MS ?? 5_000),
+    scratchDirectory = process.env.HARNESS_SCRATCH_ROOT || DEFAULT_SCRATCH_DIRECTORY,
+    backgroundCompletionIntervalMs = Number(process.env.HARNESS_BACKGROUND_COMPLETION_TICK_MS ?? 5_000),
     titleGenerator = createRootTitleGenerator(),
     notificationIdleMs = NOTIFICATION_IDLE_MS,
     notificationTickMs = 1_000,
@@ -304,7 +304,7 @@ export class HarnessSupervisor {
         maxParallel: this.cronMaxParallel, defaultTimezone: this.cronDefaultTimezone, logger: this.logger });
       this.#cronScheduler.start();
       if (this.inboxPort != null) {
-        if (!Number.isInteger(this.inboxPort) || this.inboxPort < 0 || this.inboxPort > 65535) throw new Error("PI_HARNESS_INBOX_PORT must be a TCP port");
+        if (!Number.isInteger(this.inboxPort) || this.inboxPort < 0 || this.inboxPort > 65535) throw new Error("HARNESS_INBOX_PORT must be a TCP port");
         this.#inboxStore = new InboxStore(this.databasePath, { db: this.#store.database });
         this.#inboxServer = createInboxServer({ store: this.#inboxStore, deliver: (message) => this.#deliverInboxMessage(message), logger: this.logger });
         await new Promise((resolve, reject) => { this.#inboxServer.once("error", reject);
@@ -1579,14 +1579,14 @@ export class HarnessSupervisor {
     return args;
   }
   #actorEnv(session, compileCache, generationSkillGrantPath, scratch) {
-    const env = { ...process.env, PI_HARNESS_SOCKET: this.socketPath, PI_HARNESS_AUTO_START: "0", PI_HARNESS_ACTOR_ID: session.sessionId, PI_HARNESS_ACTOR_TOKEN: session.actorToken, PI_HARNESS_ACTOR_GENERATION: String(session.actorGeneration) };
-    env.PI_HARNESS_ROOT_SESSION_ID = scratch.rootSessionId;
-    env.PI_HARNESS_SCRATCH_DIRECTORY = scratch.directory;
+    const env = { ...process.env, HARNESS_SOCKET: this.socketPath, HARNESS_AUTO_START: "0", HARNESS_ACTOR_ID: session.sessionId, HARNESS_ACTOR_TOKEN: session.actorToken, HARNESS_ACTOR_GENERATION: String(session.actorGeneration) };
+    env.HARNESS_ROOT_SESSION_ID = scratch.rootSessionId;
+    env.HARNESS_SCRATCH_DIRECTORY = scratch.directory;
     env[RUNTIME_DIRECTORY_ENV] = this.runtimeDir;
     delete env.PI_SESSION_ID; delete env.PI_SESSION_FILE;
     delete env[SESSION_COMPILE_CACHE_ENV];
     if (compileCache) env[SESSION_COMPILE_CACHE_ENV] = compileCache.directory;
-    env.PI_HARNESS_ACTOR_SKILL_GRANT = generationSkillGrantPath;
+    env.HARNESS_ACTOR_SKILL_GRANT = generationSkillGrantPath;
     return env;
   }
   async #launchActor(sessionId, check) {

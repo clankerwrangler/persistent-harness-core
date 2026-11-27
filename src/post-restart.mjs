@@ -34,18 +34,18 @@ function boundedTimeout(value) {
   return parsed;
 }
 function resolvePaths(values, env) {
-  const agentDir = path.resolve(env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"));
+  const agentDir = path.resolve(env.HARNESS_DIR || path.join(os.homedir(), ".harness"));
   const harnessDir = path.join(agentDir, "harness");
   return {
     agentDir,
-    socketPath: path.resolve(values.socketPath || env.PI_HARNESS_SOCKET || path.join(harnessDir, "supervisor.sock")),
-    databasePath: path.resolve(values.databasePath || env.PI_HARNESS_DATABASE || path.join(harnessDir, "harness.sqlite")),
-    pidPath: path.resolve(values.pidPath || env.PI_HARNESS_PID || path.join(harnessDir, "supervisor.pid")),
+    socketPath: path.resolve(values.socketPath || env.HARNESS_SOCKET || path.join(harnessDir, "supervisor.sock")),
+    databasePath: path.resolve(values.databasePath || env.HARNESS_DATABASE || path.join(harnessDir, "harness.sqlite")),
+    pidPath: path.resolve(values.pidPath || env.HARNESS_PID || path.join(harnessDir, "supervisor.pid")),
   };
 }
 
 export function parseRestartArgs(argv, env = process.env) {
-  const values = { resumeSessionId: env.PI_HARNESS_ACTOR_ID || null, timeoutMs: DEFAULT_RESTART_TIMEOUT_MS };
+  const values = { resumeSessionId: env.HARNESS_ACTOR_ID || null, timeoutMs: DEFAULT_RESTART_TIMEOUT_MS };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -63,11 +63,11 @@ export function parseRestartArgs(argv, env = process.env) {
     } else throw new Error(`unknown option: ${flag}`);
   }
   if (values.workerJobPath) {
-    if (env.PI_HARNESS_RESTART_WORKER !== "1") throw new Error("worker mode is available only to a scheduled restart process");
+    if (env.HARNESS_RESTART_WORKER !== "1") throw new Error("worker mode is available only to a scheduled restart process");
     return { workerJobPath: values.workerJobPath };
   }
   values.resumeSessionId = boundedString(values.resumeSessionId, "resume session id", MAX_SESSION_ID_BYTES);
-  if (env.PI_HARNESS_ACTOR_ID && values.resumeSessionId !== env.PI_HARNESS_ACTOR_ID) {
+  if (env.HARNESS_ACTOR_ID && values.resumeSessionId !== env.HARNESS_ACTOR_ID) {
     throw new Error("an actor may restart and resume only its own session");
   }
   return { ...resolvePaths(values, env), resumeSessionId: values.resumeSessionId, timeoutMs: boundedTimeout(values.timeoutMs) };
@@ -75,7 +75,7 @@ export function parseRestartArgs(argv, env = process.env) {
 
 export function sanitizedRestartEnvironment(env = process.env) {
   const result = { ...env };
-  for (const name of ["PI_HARNESS_ACTOR_ID", "PI_HARNESS_ACTOR_TOKEN", "PI_HARNESS_ACTOR_GENERATION", "PI_HARNESS_ACTOR_SKILL_GRANT", "PI_HARNESS_ROOT_SESSION_ID", "PI_HARNESS_SCRATCH_DIRECTORY", "PI_HARNESS_RESTART_WORKER", "PI_SESSION_ID", "PI_SESSION_FILE"]) delete result[name];
+  for (const name of ["HARNESS_ACTOR_ID", "HARNESS_ACTOR_TOKEN", "HARNESS_ACTOR_GENERATION", "HARNESS_ACTOR_SKILL_GRANT", "HARNESS_ROOT_SESSION_ID", "HARNESS_SCRATCH_DIRECTORY", "HARNESS_RESTART_WORKER", "PI_SESSION_ID", "PI_SESSION_FILE"]) delete result[name];
   return result;
 }
 
@@ -226,10 +226,10 @@ export async function schedulePostRestart(options, { scriptPath, spawnImpl = spa
   await writeJsonAtomic(jobPath, job);
   const workerEnv = {
     ...sanitizedRestartEnvironment(process.env),
-    PI_HARNESS_SOCKET: options.socketPath,
-    PI_HARNESS_DATABASE: options.databasePath,
-    PI_HARNESS_PID: options.pidPath,
-    PI_HARNESS_RESTART_WORKER: "1",
+    HARNESS_SOCKET: options.socketPath,
+    HARNESS_DATABASE: options.databasePath,
+    HARNESS_PID: options.pidPath,
+    HARNESS_RESTART_WORKER: "1",
   };
   const child = spawnImpl(process.execPath, [path.resolve(scriptPath), "--worker", jobPath], {
     detached: true, stdio: "ignore", env: workerEnv,

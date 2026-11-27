@@ -271,8 +271,8 @@ export class PythonKernel {
       cwd: this.cwd,
       env: {
         ...process.env,
-        ...(this.scratch ? { PI_HARNESS_ROOT_SESSION_ID: this.scratch.rootSessionId,
-          PI_HARNESS_SCRATCH_DIRECTORY: this.scratch.directory } : {}),
+        ...(this.scratch ? { HARNESS_ROOT_SESSION_ID: this.scratch.rootSessionId,
+          HARNESS_SCRATCH_DIRECTORY: this.scratch.directory } : {}),
         PYTHONDONTWRITEBYTECODE: "1",
         PYTHONUNBUFFERED: "1",
         PYTHONPATH: [...pythonPaths, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),

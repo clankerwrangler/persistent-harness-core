@@ -94,7 +94,7 @@ export function skillPrompt(skills, nativeAsync = false) {
   ].join("\n");
 }
 
-export function nativeAsyncEnabled(model, enabled = process.env.PI_HARNESS_NATIVE_ASYNC) {
+export function nativeAsyncEnabled(model, enabled = process.env.HARNESS_NATIVE_ASYNC) {
   return enabled === "1" && model?.provider === "openai-codex"
     && model?.api === "openai-codex-responses"
     && model?.compat?.supportsAsyncTools === true;

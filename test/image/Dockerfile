@@ -41,10 +41,10 @@ COPY --from=core /usr/local/bin/core /usr/local/bin/core
 COPY --from=core /core/js /opt/core/js
 COPY --from=core /core/models.json /opt/core/models.json
 
-ENV PI_HARNESS_CORE_BIN=/usr/local/bin/core \
-    PI_HARNESS_CORE_JS=/opt/core/js/core.mjs \
-    PI_HARNESS_CORE_MODELS=/opt/core/models.json \
-    PI_HARNESS_PYTHON=/opt/kernel-runtime/test-python \
-    PI_HARNESS_TEST_MANAGED_SEED=/opt/kernel-seed
+ENV HARNESS_CORE_BIN=/usr/local/bin/core \
+    HARNESS_CORE_JS=/opt/core/js/core.mjs \
+    HARNESS_CORE_MODELS=/opt/core/models.json \
+    HARNESS_PYTHON=/opt/kernel-runtime/test-python \
+    HARNESS_TEST_MANAGED_SEED=/opt/kernel-seed
 USER node
 WORKDIR /home/node

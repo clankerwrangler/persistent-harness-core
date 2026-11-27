@@ -284,7 +284,7 @@ test("post-commit helper processes share the active scheduler's canonical row an
   const arm = async () => {
     const result = await promisify(execFile)(process.execPath, [path.resolve("bin/maintenance-cron.mjs"),
       "--database", args.databasePath, "--intent", intentFile, "--operation", "ensure-armed"],
-    { env: { PATH: process.env.PATH, HOME: root, PI_CODING_AGENT_DIR: path.join(root, "agent"), PI_HARNESS_SKILLS_PATH: path.join(root, "skills") }, timeout: 120_000, maxBuffer: 16_384 });
+    { env: { PATH: process.env.PATH, HOME: root, HARNESS_DIR: path.join(root, "agent"), HARNESS_SKILLS_PATH: path.join(root, "skills") }, timeout: 120_000, maxBuffer: 16_384 });
     const receipt = JSON.parse(result.stdout); assert.equal(receipt.ok, true); assert.equal(receipt.armed, true);
     assert.equal(receipt.mutationPossible, true); return receipt;
   };
@@ -326,7 +326,7 @@ test("one-shot ensure-armed failures retain safe inspected evidence and a failin
     try {
       const result = await promisify(execFile)(process.execPath, [path.resolve("bin/maintenance-cron.mjs"),
         "--database", args.databasePath, "--intent", intentFile, "--operation", operation],
-      { env: { PATH: process.env.PATH, HOME: root, PI_CODING_AGENT_DIR: path.join(root, "agent"), PI_HARNESS_SKILLS_PATH: path.join(root, "skills") }, timeout: 120_000, maxBuffer: 16_384 });
+      { env: { PATH: process.env.PATH, HOME: root, HARNESS_DIR: path.join(root, "agent"), HARNESS_SKILLS_PATH: path.join(root, "skills") }, timeout: 120_000, maxBuffer: 16_384 });
       return { code: 0, receipt: JSON.parse(result.stdout) };
     } catch (error) { return { code: error.code, receipt: JSON.parse(error.stdout) }; }
   };
@@ -369,7 +369,7 @@ test("the one-shot CLI stages an already due sealed intent without a replacement
   const run = async (operation) => {
     const result = await promisify(execFile)(process.execPath, [path.resolve("bin/maintenance-cron.mjs"),
       "--database", args.databasePath, "--intent", intentFile, "--operation", operation],
-    { env: { PATH: process.env.PATH, HOME: root, PI_CODING_AGENT_DIR: path.join(root, "agent"), PI_HARNESS_SKILLS_PATH: path.join(root, "skills") }, timeout: 120_000, maxBuffer: 16_384 });
+    { env: { PATH: process.env.PATH, HOME: root, HARNESS_DIR: path.join(root, "agent"), HARNESS_SKILLS_PATH: path.join(root, "skills") }, timeout: 120_000, maxBuffer: 16_384 });
     return JSON.parse(result.stdout);
   };
   const staged = await run("admit");

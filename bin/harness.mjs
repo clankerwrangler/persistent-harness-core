@@ -25,8 +25,8 @@ function parse(argv) {
   return values;
 }
 function paths(options) {
-  const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"); const runtime = path.join(agentDir, "harness");
-  return { socketPath: path.resolve(options.socket || process.env.PI_HARNESS_SOCKET || path.join(runtime, "supervisor.sock")), databasePath: path.resolve(options.db || process.env.PI_HARNESS_DATABASE || path.join(runtime, "harness.sqlite")), pidPath: path.resolve(options.pid || process.env.PI_HARNESS_PID || path.join(runtime, "supervisor.pid")) };
+  const agentDir = process.env.HARNESS_DIR || path.join(os.homedir(), ".harness"); const runtime = path.join(agentDir, "harness");
+  return { socketPath: path.resolve(options.socket || process.env.HARNESS_SOCKET || path.join(runtime, "supervisor.sock")), databasePath: path.resolve(options.db || process.env.HARNESS_DATABASE || path.join(runtime, "harness.sqlite")), pidPath: path.resolve(options.pid || process.env.HARNESS_PID || path.join(runtime, "supervisor.pid")) };
 }
 async function ensure(runtime) {
   try {

@@ -92,7 +92,7 @@ effort; other Python threads can mutate history independently.
 
 ## State locations
 
-`PI_CODING_AGENT_DIR` defaults to `~/.pi/agent`. The normal supervisor paths beneath it are:
+`HARNESS_DIR` defaults to `~/.harness`. The normal supervisor paths beneath it are:
 
 - `harness/supervisor.sock`: local control socket.
 - `harness/harness.sqlite`: durable supervision, inputs, schedules, and telemetry.
@@ -118,7 +118,7 @@ Deletion retains session histories, kernel state, and artifacts. Successful resp
 
 ### Root session scratch
 
-Each supervised root owns `/workspace/.scratch/<root-session-id>/`. The supervisor derives the owner from canonical parent ancestry and supplies the same path to every descendant, the system prompt, Python's `scratch_dir` (`pathlib.Path`), and managed actor/kernel/host-shell environments. The path is independent of cwd, family labels, actor generation, and caller parameters. The trusted supervisor environment can set `PI_HARNESS_SCRATCH_ROOT`, and embedders can set its `scratchDirectory` option; tests use private temporary directories.
+Each supervised root owns a directory beneath the configured scratch base. The supervisor derives the owner from canonical parent ancestry and supplies the same path to every descendant, the system prompt, Python's `scratch_dir` (`pathlib.Path`), and managed actor/kernel/host-shell environments. The path is independent of cwd, family labels, actor generation, and caller parameters. The trusted supervisor environment can set `HARNESS_SCRATCH_ROOT`, and embedders can set its `scratchDirectory` option; tests use private temporary directories.
 
 Stop, passivation, supervisor shutdown, and child deletion preserve this directory. Startup recreates a missing owned root directory under its unchanged witnessed base, but rejects an existing replacement. Explicit root deletion atomically tombstones the family and records pending scratch reclamation on the existing root row. It does not wait for or kill detached jobs. Root deletion responses include `scratchCleanup`: `unowned`, `deleting`, `removed`, or `unknown` (invalid ownership metadata).
 
@@ -166,7 +166,7 @@ The one-shot catalog request waits for the list with a 15-second abort deadline.
 
 ## Configuration notes
 
-`PI_HARNESS_ACTOR_STARTUP_TIMEOUT_MS` defaults to `120000` (accepted range
+`HARNESS_ACTOR_STARTUP_TIMEOUT_MS` defaults to `120000` (accepted range
 `100`–`300000`). Each spawned worker has one finite startup deadline shared by
 initial `get_state`, which includes starting the session's core.
 Ordinary actor RPCs retain their `30000` ms deadline; prompt preflight retains
@@ -183,11 +183,11 @@ Direct `PiSessionActor` callers that omit `startupTimeoutMs` inherit their
 
 Prompts use the generic roles `user` and `assistant`. Keep deployment identities and personal instructions in the AGENTS files the core reads, outside this checkout. Beside each, `AGENTS.depth-N.md` adds instructions for sessions at depth N only, followed by the Markdown files in `AGENTS.depth-N.d/` in name order.
 
-Presentation directives default to `harness.presentation.v1`. `PI_HARNESS_PRESENTATION_NAMESPACE` selects a deployment-specific namespace (lowercase letter followed by up to 31 lowercase letters, digits, or hyphens). Set it to the existing marker's prefix before upgrading an installation with a different marker. Use the same value in the supervisor and any client importing its presentation helpers, and keep the model's directive instructions consistent. This preserves existing transcript markers and client schemas without embedding an identity in the repository.
+Presentation directives default to `harness.presentation.v1`. `HARNESS_PRESENTATION_NAMESPACE` selects a deployment-specific namespace (lowercase letter followed by up to 31 lowercase letters, digits, or hyphens). Set it to the existing marker's prefix before upgrading an installation with a different marker. Use the same value in the supervisor and any client importing its presentation helpers, and keep the model's directive instructions consistent. This preserves existing transcript markers and client schemas without embedding an identity in the repository.
 
-The default cron timezone is `UTC`. Set `PI_HARNESS_CRON_TIMEZONE` to the deployment's intended timezone before upgrading if it previously relied on a local default. Existing jobs keep their stored timezone. Models come from the core's models file and provider sign-ins from the core; credentials are not stored in this checkout.
+The default cron timezone is `UTC`. Set `HARNESS_CRON_TIMEZONE` to the deployment's intended timezone before upgrading if it previously relied on a local default. Existing jobs keep their stored timezone. Models come from the core's models file and provider sign-ins from the core; credentials are not stored in this checkout.
 
-`PI_HARNESS_SKILLS_PATH` changes the complete catalog, not merely one prompt. Provision and validate its dependencies before starting workers. An explicit `PI_HARNESS_PYTHON` bypasses managed provisioning and must already contain compatible IPython, dill, and skill dependencies.
+`HARNESS_SKILLS_PATH` changes the complete catalog, not merely one prompt. Provision and validate its dependencies before starting workers. An explicit `HARNESS_PYTHON` bypasses managed provisioning and must already contain compatible IPython, dill, and skill dependencies.
 
 ## Develop and promote one source revision
 

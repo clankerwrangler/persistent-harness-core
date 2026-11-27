@@ -12,8 +12,8 @@ export async function coreFakeProvider(root, baseUrl, { provider = "harness-fake
     api: "openai-completions", baseUrl, contextWindow, reasoning: false }])) }));
   await writeFile(auth, JSON.stringify({ [provider]: { type: "api_key", key: "fake" } }), { mode: 0o600 });
   return {
-    PI_HARNESS_CORE_ARGS: JSON.stringify(["--models", modelsFile, "--auth", auth, "--catalog", path.join(directory, "catalog"), "--agent-dir", agentDir]),
-    PI_HARNESS_CORE_SESSIONS: path.join(directory, "sessions"),
+    HARNESS_CORE_ARGS: JSON.stringify(["--models", modelsFile, "--auth", auth, "--catalog", path.join(directory, "catalog"), "--agent-dir", agentDir]),
+    HARNESS_CORE_SESSIONS: path.join(directory, "sessions"),
   };
 }
 

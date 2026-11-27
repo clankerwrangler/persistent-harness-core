@@ -10,7 +10,7 @@ import { controlRequest } from "../src/control.mjs";
 import { HarnessSupervisor, supervisorInternals } from "./fixtures/isolated-supervisor.mjs";
 
 const supervisorBin = path.resolve(import.meta.dirname, "..", "bin", "harness-supervisor.mjs");
-const LIVE_HARNESS_DIR = path.resolve(os.homedir(), ".pi", "agent", "harness");
+const LIVE_HARNESS_DIR = path.resolve(os.homedir(), ".harness", "harness");
 const STALE_OWNER = "01234567-89ab-4cde-8f01-23456789abcd";
 const OLD_STARTED_AT = Date.now() - 86_400_000;
 

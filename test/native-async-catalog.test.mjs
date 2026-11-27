@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { coreLiveFixture, until } from "./fixtures/core-live.mjs";
 
-const ready = Boolean(process.env.PI_HARNESS_CORE_BIN && process.env.PI_HARNESS_CORE_JS && process.env.PI_HARNESS_PYTHON);
+const ready = Boolean(process.env.HARNESS_CORE_BIN && process.env.HARNESS_CORE_JS && process.env.HARNESS_PYTHON);
 
 test("shipped Codex catalog enables Python async and wait receives its real result first", { skip: !ready && "core or Python runtime not configured", timeout: 120_000 }, async (t) => {
-  assert(process.env.PI_HARNESS_CORE_MODELS, "PI_HARNESS_CORE_MODELS must name the core's shipped models.json");
+  assert(process.env.HARNESS_CORE_MODELS, "HARNESS_CORE_MODELS must name the core's shipped models.json");
   const f = await coreLiveFixture(t, "catalog-async", ({ response, body, index, send, done }) => {
     if (index === 1) {
       const python = body.tools.find((tool) => tool.name === "ipython");
@@ -33,7 +33,7 @@ test("shipped Codex catalog enables Python async and wait receives its real resu
 });
 
 test("a shipped Codex model without native support does not advertise async", { skip: !ready && "core or Python runtime not configured", timeout: 120_000 }, async (t) => {
-  assert(process.env.PI_HARNESS_CORE_MODELS, "PI_HARNESS_CORE_MODELS must name the core's shipped models.json");
+  assert(process.env.HARNESS_CORE_MODELS, "HARNESS_CORE_MODELS must name the core's shipped models.json");
   const f = await coreLiveFixture(t, "catalog-ordinary", ({ response, body, index, send, done }) => {
     assert.notEqual(body.tools.find((tool) => tool.name === "ipython")?.async, true);
     assert.equal(body.tools.some((tool) => tool.name === "wait_for_ipython"), false);
@@ -46,7 +46,7 @@ test("a shipped Codex model without native support does not advertise async", { 
 });
 
 test("refreshed Codex metadata retains shipped async capability in worker preparation", { skip: !ready && "core or Python runtime not configured", timeout: 120_000 }, async (t) => {
-  assert(process.env.PI_HARNESS_CORE_MODELS, "PI_HARNESS_CORE_MODELS must name the core's shipped models.json");
+  assert(process.env.HARNESS_CORE_MODELS, "HARNESS_CORE_MODELS must name the core's shipped models.json");
   const f = await coreLiveFixture(t, "catalog-refreshed", ({ response, body, index, send, done }) => {
     assert.equal(body.tools.find((tool) => tool.name === "ipython")?.async, true);
     assert(body.tools.some((tool) => tool.name === "wait_for_ipython"));

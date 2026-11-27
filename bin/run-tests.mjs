@@ -18,10 +18,10 @@ if (!["unit", "integration", "all"].includes(group)) {
   console.error("usage: node bin/run-tests.mjs [unit|integration|all] [test files...]");
   process.exit(2);
 }
-const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pi", "agent");
+const agentDir = process.env.HARNESS_DIR ?? path.join(os.homedir(), ".harness");
 
 function discoverPython() {
-  if (process.env.PI_HARNESS_PYTHON) return process.env.PI_HARNESS_PYTHON;
+  if (process.env.HARNESS_PYTHON) return process.env.HARNESS_PYTHON;
   const environments = path.join(agentDir, "harness/kernel-runtime/environments");
   if (!existsSync(environments)) return null;
   for (const name of readdirSync(environments).sort()) {
@@ -35,7 +35,7 @@ function discoverPython() {
 // its cache and the installed interpreter. Copy them (never the live environments) so
 // the tests cannot write into the live runtime.
 function prepareManagedSeed(seedDir) {
-  if (process.env.PI_HARNESS_TEST_MANAGED_SEED) return process.env.PI_HARNESS_TEST_MANAGED_SEED;
+  if (process.env.HARNESS_TEST_MANAGED_SEED) return process.env.HARNESS_TEST_MANAGED_SEED;
   const runtime = path.join(agentDir, "harness/kernel-runtime");
   const parts = ["bin", "cache", "python"];
   if (!parts.every((part) => existsSync(path.join(runtime, part)))) return null;
@@ -48,8 +48,8 @@ const integration = new Set(readFileSync(path.join(checkout, "test/integration-f
 const all = readdirSync(path.join(checkout, "test")).filter((name) => name.endsWith(".test.mjs")).sort();
 const python = discoverPython();
 // Sessions run on the conversation core: the integration group needs it and Python.
-const core = Boolean(process.env.PI_HARNESS_CORE_BIN && process.env.PI_HARNESS_CORE_JS);
-const missing = [!core && "the conversation core (set PI_HARNESS_CORE_BIN and PI_HARNESS_CORE_JS)", !python && "Python runtime (set PI_HARNESS_PYTHON)"].filter(Boolean);
+const core = Boolean(process.env.HARNESS_CORE_BIN && process.env.HARNESS_CORE_JS);
+const missing = [!core && "the conversation core (set HARNESS_CORE_BIN and HARNESS_CORE_JS)", !python && "Python runtime (set HARNESS_PYTHON)"].filter(Boolean);
 
 let files;
 if (explicit.length) files = explicit.map((file) => path.relative(path.join(checkout, "test"), path.resolve(file)));
@@ -67,27 +67,27 @@ if (missing.length) {
 if (!files.length) { console.log("no test files to run"); process.exit(0); }
 
 const home = mkdtempSync(path.join(os.tmpdir(), "harness-tests-"));
-const seedUsers = files.filter((name) => readFileSync(path.join(checkout, "test", name), "utf8").includes("PI_HARNESS_TEST_MANAGED_SEED"));
+const seedUsers = files.filter((name) => readFileSync(path.join(checkout, "test", name), "utf8").includes("HARNESS_TEST_MANAGED_SEED"));
 const managedSeed = seedUsers.length ? prepareManagedSeed(path.join(home, "managed-seed")) : null;
 const env = {
   ...process.env,
   HOME: path.join(home, "home"),
-  PI_CODING_AGENT_DIR: path.join(home, "agent"),
+  HARNESS_DIR: path.join(home, "agent"),
   // Tests must never download a runtime as a side effect.
-  PI_HARNESS_AUTO_INSTALL: "0", UV_OFFLINE: "1",
+  HARNESS_AUTO_INSTALL: "0", UV_OFFLINE: "1",
   // Tests wait on background completion scans; the production 5 s cadence only slows them.
-  PI_HARNESS_BACKGROUND_COMPLETION_TICK_MS: process.env.PI_HARNESS_BACKGROUND_COMPLETION_TICK_MS ?? "100",
-  PI_HARNESS_SKILLS_PATH: process.env.PI_HARNESS_SKILLS_PATH ?? path.join(checkout, "skills"),
-  PI_HARNESS_PRESENTATION_NAMESPACE: process.env.PI_HARNESS_PRESENTATION_NAMESPACE ?? "harness",
-  ...(python ? { PI_HARNESS_PYTHON: python } : {}),
-  ...(managedSeed ? { PI_HARNESS_TEST_MANAGED_SEED: managedSeed } : {}),
+  HARNESS_BACKGROUND_COMPLETION_TICK_MS: process.env.HARNESS_BACKGROUND_COMPLETION_TICK_MS ?? "100",
+  HARNESS_SKILLS_PATH: process.env.HARNESS_SKILLS_PATH ?? path.join(checkout, "skills"),
+  HARNESS_PRESENTATION_NAMESPACE: process.env.HARNESS_PRESENTATION_NAMESPACE ?? "harness",
+  ...(python ? { HARNESS_PYTHON: python } : {}),
+  ...(managedSeed ? { HARNESS_TEST_MANAGED_SEED: managedSeed } : {}),
 };
 try {
   // Files run in separate processes with private temporary state, so a few can run at once.
   // Keep it modest: the suite shares the machine with live sessions.
-  const concurrency = process.env.PI_HARNESS_TEST_CONCURRENCY ?? "3";
+  const concurrency = process.env.HARNESS_TEST_CONCURRENCY ?? "3";
   // A test that hangs fails after this long instead of holding the whole run (tests may set their own).
-  const timeout = process.env.PI_HARNESS_TEST_TIMEOUT_MS ?? "300000";
+  const timeout = process.env.HARNESS_TEST_TIMEOUT_MS ?? "300000";
   const result = spawnSync(process.execPath, ["--test", `--test-concurrency=${concurrency}`, `--test-timeout=${timeout}`, ...files.map((name) => path.join("test", name))],
     { cwd: checkout, env, stdio: "inherit" });
   process.exitCode = result.status ?? 1;

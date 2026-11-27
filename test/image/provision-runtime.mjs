@@ -22,7 +22,7 @@ const scratch = await mkdtemp(path.join(os.tmpdir(), "seed-cache-"));
 execFileSync(path.join(runtimeDir, "bin", "uv-0.12.3"), ["pip", "install", "--python", runtime.pythonPath, "--target", scratch,
   "six==1.17.0", "--cache-dir", path.join(runtimeDir, "cache"), "--no-config", "--no-progress"], { stdio: "inherit" });
 await rm(scratch, { recursive: true, force: true });
-// One fixed path for the tests (PI_HARNESS_PYTHON), whatever the environment's name. A
+// One fixed path for the tests (HARNESS_PYTHON), whatever the environment's name. A
 // script, not a symlink: Python finds its environment from the path it is started by.
 await writeFile(path.join(runtimeDir, "test-python"), `#!/bin/sh\nexec ${JSON.stringify(runtime.pythonPath)} "$@"\n`, { mode: 0o755 });
 console.log(`python runtime: ${runtime.pythonPath}`);

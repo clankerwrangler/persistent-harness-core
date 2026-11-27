@@ -65,9 +65,9 @@ async function fixture(t, { real = false } = {}) {
     assert.deepEqual(errors, []);
   });
   for (const key of Object.keys(process.env)) delete process.env[key];
-  Object.assign(process.env, { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: home, PI_CODING_AGENT_DIR: agentDir,
-    PI_HARNESS_AUTO_INSTALL: "0", PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", UV_OFFLINE: "1", PYTHONDONTWRITEBYTECODE: "1",
-    ...Object.fromEntries(["PI_HARNESS_CORE_BIN", "PI_HARNESS_CORE_JS", "PI_HARNESS_PYTHON"].filter((key) => saved[key]).map((key) => [key, saved[key]])) });
+  Object.assign(process.env, { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: home, HARNESS_DIR: agentDir,
+    HARNESS_AUTO_INSTALL: "0", PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", UV_OFFLINE: "1", PYTHONDONTWRITEBYTECODE: "1",
+    ...Object.fromEntries(["HARNESS_CORE_BIN", "HARNESS_CORE_JS", "HARNESS_PYTHON"].filter((key) => saved[key]).map((key) => [key, saved[key]])) });
   if (real) {
     server = http.createServer(async (request, response) => {
       try {
@@ -85,7 +85,7 @@ async function fixture(t, { real = false } = {}) {
     await writeFile(models, JSON.stringify({ models: { "fake-model": { provider: "harness-fake", id: "fake-model", api: "openai-responses",
       baseUrl: `http://127.0.0.1:${server.address().port}/v1`, contextWindow: 100_000, reasoning: false } } }));
     await writeFile(auth, JSON.stringify({ "harness-fake": { type: "api_key", key: "fake" } }), { mode: 0o600 });
-    process.env.PI_HARNESS_CORE_ARGS = JSON.stringify(["--models", models, "--auth", auth, "--catalog", path.join(directory, "catalog"), "--agent-dir", agentDir]);
+    process.env.HARNESS_CORE_ARGS = JSON.stringify(["--models", models, "--auth", auth, "--catalog", path.join(directory, "catalog"), "--agent-dir", agentDir]);
   }
   const socketPath = path.join(directory, "run", "supervisor.sock");
   supervisor = new HarnessSupervisor({ socketPath, databasePath: path.join(directory, "state", "harness.sqlite"),

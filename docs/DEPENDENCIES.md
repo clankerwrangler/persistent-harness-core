@@ -12,15 +12,15 @@ execution tool.
 ### Build and install
 
 Build the core with a Rust toolchain that supports the 2024 edition. Install the binary
-and `js/core.mjs` from the same core checkout. If you set `PI_CODING_AGENT_DIR` or
-`PI_HARNESS_CORE_HOME`, use the same absolute path for these commands and the supervisor.
+and `js/core.mjs` from the same core checkout. If you set `HARNESS_DIR` or
+`HARNESS_CORE_HOME`, use the same absolute path for these commands and the supervisor.
 From a directory where you want the core source, run:
 
 ```sh
 git clone https://github.com/clankerwrangler/conversation-core.git
 cd conversation-core
 cargo build --release --locked
-CORE_HOME="${PI_HARNESS_CORE_HOME:-${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/core}"
+CORE_HOME="${HARNESS_CORE_HOME:-${HARNESS_DIR:-$HOME/.harness}/core}"
 mkdir -p "$CORE_HOME/bin" "$CORE_HOME/js"
 install -m 755 target/release/core "$CORE_HOME/bin/core"
 install -m 644 js/core.mjs "$CORE_HOME/js/core.mjs"
@@ -36,7 +36,7 @@ fi
 ```
 
 The core's files for harness sessions live together under `core/` in the agent folder
-(`PI_CODING_AGENT_DIR`, default `~/.pi/agent`):
+(`HARNESS_DIR`, default `~/.harness`):
 
 - `core/bin/core` and `core/js/core.mjs`: the installed core.
 - `core/auth.json`: the provider sign-ins.
@@ -51,12 +51,12 @@ it asks the core for remaining usage or runs a sign-in.
 
 Optional settings, mainly for tests or custom installations:
 
-- `PI_HARNESS_CORE_HOME`: another folder in place of `<agent folder>/core`.
-- `PI_HARNESS_CORE_BIN`, `PI_HARNESS_CORE_JS`: another core binary or `js/core.mjs`.
+- `HARNESS_CORE_HOME`: another folder in place of `<agent folder>/core`.
+- `HARNESS_CORE_BIN`, `HARNESS_CORE_JS`: another core binary or `js/core.mjs`.
   If these are set, use those paths instead of the default install paths.
-- `PI_HARNESS_CORE_ARGS`: a JSON array of flags passed to every core, after the defaults.
+- `HARNESS_CORE_ARGS`: a JSON array of flags passed to every core, after the defaults.
   A flag given here, such as `--auth`, replaces its default.
-- `PI_HARNESS_CORE_SESSIONS`: another folder for session folders.
+- `HARNESS_CORE_SESSIONS`: another folder for session folders.
 
 ### Provider sign-in
 
@@ -64,11 +64,11 @@ Use the same agent and core settings for sign-in and for the harness. For exampl
 in to Codex with a device code, run:
 
 ```sh
-CORE_HOME="${PI_HARNESS_CORE_HOME:-${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/core}"
-"${PI_HARNESS_CORE_BIN:-$CORE_HOME/bin/core}" login openai-codex device --auth "$CORE_HOME/auth.json"
+CORE_HOME="${HARNESS_CORE_HOME:-${HARNESS_DIR:-$HOME/.harness}/core}"
+"${HARNESS_CORE_BIN:-$CORE_HOME/bin/core}" login openai-codex device --auth "$CORE_HOME/auth.json"
 ```
 
-If `PI_HARNESS_CORE_ARGS` supplies `--auth`, use that file instead. The core's standalone
+If `HARNESS_CORE_ARGS` supplies `--auth`, use that file instead. The core's standalone
 credential default is separate from the harness default. The core writes sign-ins with
 owner-only permissions and renews them under a lock; the harness does not read the
 credentials. See the core's
@@ -90,7 +90,7 @@ review the packages and skills, and approve the exact returned fingerprint with
 installed runtime; they do not install one or prompt for installation. If no usable runtime
 is installed, session Python startup fails until provisioning is complete.
 
-`PI_HARNESS_AUTO_INSTALL=1` permits managed runtime installation without a separate
+`HARNESS_AUTO_INSTALL=1` permits managed runtime installation without a separate
 approval, including when requesting a runtime plan. Leave it unset to require approval.
 Managed environments are selected by dependencies and skill manifests. A completed
 environment with matching dependencies can be reused, including after a source-only skill
@@ -105,7 +105,7 @@ validate a new process.
 
 During a managed session launch, an import, version, or executable rejection can select
 another compatible completed environment. An explicit interpreter is the only candidate
-when `PI_HARNESS_PYTHON` is set. Configuration, control, and restore failures do not
+when `HARNESS_PYTHON` is set. Configuration, control, and restore failures do not
 trigger runtime repair. A newly built runtime publishes its completion record after
 import/version validation, even if later namespace restoration fails.
 
@@ -113,7 +113,7 @@ For an existing compatible interpreter with IPython, dill, and the catalog's Pyt
 dependencies already installed:
 
 ```sh
-export PI_HARNESS_PYTHON=/absolute/path/to/python
+export HARNESS_PYTHON=/absolute/path/to/python
 node bin/provision-skills.mjs
 ```
 
@@ -121,14 +121,14 @@ The bundled catalog provides `agent-message`, `background`, `cron`, `files`, `in
 `kernel`, `operations`, `rlm`, `session-history`, and `shell`. The nine Python-backed
 skills declare empty dependency lists in their `pyproject.toml` files; `inbox` is
 guidance-only. No host inventory, SSH wrappers, mail, vault, persona, or standing policy
-is installed. Use `PI_HARNESS_SKILLS_PATH` for a different complete catalog and provision
+is installed. Use `HARNESS_SKILLS_PATH` for a different complete catalog and provision
 its declared dependencies before admitting work.
 
 ## Persistent configuration
 
 Use the same environment for the supervisor and its workers: the core settings above,
-and optionally `PI_HARNESS_PYTHON` and `PI_HARNESS_SKILLS_PATH`. Harness state (kernel
-runtimes, background jobs) lives under `PI_CODING_AGENT_DIR`, default `~/.pi/agent`. Keep
+and optionally `HARNESS_PYTHON` and `HARNESS_SKILLS_PATH`. Harness state (kernel
+runtimes, background jobs) lives under `HARNESS_DIR`, default `~/.harness`. Keep
 credentials out of source, examples, and committed environment files. Node, the core, and
 the Python runtime must remain accessible after restarting your terminal or service.
 

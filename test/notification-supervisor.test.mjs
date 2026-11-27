@@ -153,10 +153,10 @@ test("live tool execution is not idle; dialogs reach durable feed without SSE an
 });
 
 test("a test supervisor keeps the sessions it creates in its own folder and opens no inbox", async t => {
-  const saved = process.env.PI_HARNESS_INBOX_PORT;
+  const saved = process.env.HARNESS_INBOX_PORT;
   // A live port in the environment must not be taken over by a test.
-  process.env.PI_HARNESS_INBOX_PORT = "1";
-  t.after(() => { if (saved === undefined) delete process.env.PI_HARNESS_INBOX_PORT; else process.env.PI_HARNESS_INBOX_PORT = saved; });
+  process.env.HARNESS_INBOX_PORT = "1";
+  t.after(() => { if (saved === undefined) delete process.env.HARNESS_INBOX_PORT; else process.env.HARNESS_INBOX_PORT = saved; });
   const f = await fixture(t);
   assert.equal(f.supervisor.inboxAddress, null);
   const inside = (file) => !path.relative(f.dir, file).startsWith("..") && !path.isAbsolute(path.relative(f.dir, file));

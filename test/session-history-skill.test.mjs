@@ -14,7 +14,7 @@ import { PythonRuntimeManager } from "../src/python-runtime.mjs";
 import { discoverSkills, discoverSkillsFromDirectory, manifestForSkills } from "../src/skills.mjs";
 
 test("session history skill grants only its bounded authorized host request", async () => {
-  const discovered = await discoverSkillsFromDirectory(path.resolve(process.env.PI_HARNESS_SKILLS_PATH || "skills"));
+  const discovered = await discoverSkillsFromDirectory(path.resolve(process.env.HARNESS_SKILLS_PATH || "skills"));
   assert.deepEqual(discovered.diagnostics, []);
   const skill = discovered.skills.find((item) => item.id === "session-history");
   assert(skill);
@@ -28,7 +28,7 @@ test("session history skill grants only its bounded authorized host request", as
 
 test("session history Python module forwards operation payloads and preserves return DTOs", { timeout: 1080000 }, async (t) => {
   const packageRoot = path.resolve(import.meta.dirname, "..");
-  const skillPath = path.join(process.env.PI_HARNESS_SKILLS_PATH || path.join(packageRoot, "skills"), "session-history", "SKILL.md");
+  const skillPath = path.join(process.env.HARNESS_SKILLS_PATH || path.join(packageRoot, "skills"), "session-history", "SKILL.md");
   const root = await mkdtemp(path.join(os.tmpdir(), "persistent-harness-session-history-skill-"));
   let kernel;
   const calls = [];
@@ -120,7 +120,7 @@ test("actual Python skill to host to authenticated history RPC survives work bey
   assert.equal(client.requestTimeoutMs, 3000); assert.equal(client.historyRequestTimeoutMs, 28000);
   await client.start({ registrationType: "register_actor", sessionId: "caller", sessionFile: path.join(root, "caller.jsonl"),
     cwd: root, repositoryRoot: null, actorToken: "token-caller", actorGeneration: 1 });
-  const skillPath = path.join(process.env.PI_HARNESS_SKILLS_PATH || path.join(packageRoot, "skills"), "session-history", "SKILL.md");
+  const skillPath = path.join(process.env.HARNESS_SKILLS_PATH || path.join(packageRoot, "skills"), "session-history", "SKILL.md");
   const catalog = await discoverSkills([{ source: "skill", path: skillPath }]); assert.deepEqual(catalog.diagnostics, []);
   const runtime = await new PythonRuntimeManager({ runtimeDir: path.join(root, "runtime") }).ensure({ skills: catalog.skills, consent: async () => true });
   kernel = new PythonKernel({ pythonPath: runtime.pythonPath, kernelScript: path.join(packageRoot, "python-runtime", "kernel.py"),

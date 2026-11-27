@@ -14,7 +14,7 @@ export function formatMessageTime(timestamp, timeZone) {
 }
 
 // timeZone defaults to the process zone (TZ or /etc/localtime).
-export function messageTimeBlock(timestamp, { timeZone = process.env.PI_HARNESS_USER_TIMEZONE || undefined } = {}) {
+export function messageTimeBlock(timestamp, { timeZone = process.env.HARNESS_USER_TIMEZONE || undefined } = {}) {
   return { type: "text", text: formatMessageTime(timestamp, timeZone), harness: HARNESS_TIME_BLOCK };
 }
 

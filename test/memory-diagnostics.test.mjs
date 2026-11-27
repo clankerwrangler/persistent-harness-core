@@ -80,7 +80,7 @@ for line in control:
         emit({"type":"shutdown_done","id":identity}); break
 `);
   const hostEntered=Promise.withResolvers(),hostRelease=Promise.withResolvers();
-  const kernel=new PythonKernel({pythonPath:process.env.PI_HARNESS_PYTHON || "python3",kernelScript:script,
+  const kernel=new PythonKernel({pythonPath:process.env.HARNESS_PYTHON || "python3",kernelScript:script,
     runtimeSupportDir:path.resolve(import.meta.dirname,"../python-runtime"),cwd:root,stateDir:path.join(root,"state"),
     manifest:{skills:[{python:{srcPath:root,hostRequests:["fixture.host"]}}]},
     hostHandlers:{"fixture.host":async()=>{hostEntered.resolve();await hostRelease.promise;return {ok:true};}}});
@@ -181,7 +181,7 @@ m.time.monotonic=lambda: 0
 clock=iter((0,1,1,1));m.time.monotonic=lambda:next(clock)
 assert m.collect_history_memory(h)["state"]=="truncated"
 `;
-  const result=spawnSync(process.env.PI_HARNESS_PYTHON || "python3",["-I","-c",script,source],{encoding:"utf8",timeout:15000,maxBuffer:16384});
+  const result=spawnSync(process.env.HARNESS_PYTHON || "python3",["-I","-c",script,source],{encoding:"utf8",timeout:15000,maxBuffer:16384});
   assert.equal(result.status,0,result.stderr || result.error?.message);
 });
 
@@ -246,7 +246,7 @@ test("numeric transport projection drops unexpected peer bodies",async()=>{
 
 test("real fixture kernel diagnoses existing history without adding an execution or checkpoint",async t=>{
   const root=await mkdtemp(path.join(os.tmpdir(),"memory-diagnostic-real-"));
-  const kernel=new PythonKernel({pythonPath:process.env.PI_HARNESS_PYTHON || "python3",kernelScript:path.resolve(import.meta.dirname,"../python-runtime/kernel.py"),
+  const kernel=new PythonKernel({pythonPath:process.env.HARNESS_PYTHON || "python3",kernelScript:path.resolve(import.meta.dirname,"../python-runtime/kernel.py"),
     runtimeSupportDir:path.resolve(import.meta.dirname,"../python-runtime"),cwd:root,stateDir:path.join(root,"state"),manifest:{version:1,skills:[]},hostHandlers:{}});
   t.after(async()=>{await kernel.close({snapshot:false});await rm(root,{recursive:true,force:true});});
   await kernel.start();

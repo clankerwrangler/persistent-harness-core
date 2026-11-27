@@ -22,7 +22,7 @@ async function settled(client, id, text) {
   await client.request("submit_input", { sessionId: id, message: text, behavior: "auto" }); await done;
 }
 
-async function stockWorkerCase(t, { copyPrerequisites = cp, seed = process.env.PI_HARNESS_TEST_MANAGED_SEED } = {}) {
+async function stockWorkerCase(t, { copyPrerequisites = cp, seed = process.env.HARNESS_TEST_MANAGED_SEED } = {}) {
   let root, cwd, agentDir, server, supervisor, client, cronStore, admission;
   let pendingSetup = Promise.resolve();
   const diagnosticStarted = performance.now();
@@ -33,7 +33,7 @@ async function stockWorkerCase(t, { copyPrerequisites = cp, seed = process.env.P
     t.diagnostic?.(`stock-worker phase=${phase} elapsedMs=${Math.round(performance.now() - diagnosticStarted)}`);
   };
   diagnostic("setup:start");
-  const previous = Object.fromEntries(["PI_CODING_AGENT_DIR", "PI_HARNESS_CORE_ARGS", "PI_HARNESS_CORE_SESSIONS", "PI_HARNESS_PYTHON"].map((key) => [key, process.env[key]]));
+  const previous = Object.fromEntries(["HARNESS_DIR", "HARNESS_CORE_ARGS", "HARNESS_CORE_SESSIONS", "HARNESS_PYTHON"].map((key) => [key, process.env[key]]));
   t.after(async () => {
     diagnostic("cleanup:setup-drain:start");
     await pendingSetup.catch(() => {});
@@ -66,8 +66,8 @@ async function stockWorkerCase(t, { copyPrerequisites = cp, seed = process.env.P
   t.signal.throwIfAborted();
   const dependencies = [...new Set(catalog.skills.flatMap(skill => skill.python?.dependencies ?? []))].sort();
   const expectedRuntimeMessage = `Persistent Harness needs CPython ${PYTHON_VERSION} and:\n${[`ipython==${IPYTHON_VERSION}`, `dill==${DILL_VERSION}`, ...dependencies].join("\n")}`;
-  delete process.env.PI_HARNESS_PYTHON;
-  process.env.PI_CODING_AGENT_DIR = agentDir;
+  delete process.env.HARNESS_PYTHON;
+  process.env.HARNESS_DIR = agentDir;
   const bodies = [];
   let provisioningAnswered = false, provisioningError = null;
   server = http.createServer(async (request, response) => {
@@ -120,8 +120,8 @@ async function stockWorkerCase(t, { copyPrerequisites = cp, seed = process.env.P
       provisioningError = new Error(`unexpected dialog: ${e.title ?? e.method}`);
     }
   });
-  assert.equal(process.env.PI_CODING_AGENT_DIR, agentDir); assert.equal(path.dirname(agentDir), root);
-  assert.equal(process.env.PI_HARNESS_PYTHON, undefined, "fixture must install inside its own agent directory");
+  assert.equal(process.env.HARNESS_DIR, agentDir); assert.equal(path.dirname(agentDir), root);
+  assert.equal(process.env.HARNESS_PYTHON, undefined, "fixture must install inside its own agent directory");
   diagnostic("provisioning:plan");
   const plan = await client.request("get_skill_runtime_plan", {});
   assert.deepEqual(plan.packages, [`ipython==${IPYTHON_VERSION}`, `dill==${DILL_VERSION}`, ...dependencies]);

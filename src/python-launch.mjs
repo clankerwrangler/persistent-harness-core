@@ -13,7 +13,7 @@ async function exists(filePath) {
  * kernel starts is used. Only a runtime rejection (a missing or wrong interpreter) moves on to
  * the next candidate; any other failure stops, after closing the kernel it started.
  */
-export async function launchPython({ runtimeDir, pythonOverride = process.env.PI_HARNESS_PYTHON, skills, createKernel }) {
+export async function launchPython({ runtimeDir, pythonOverride = process.env.HARNESS_PYTHON, skills, createKernel }) {
   const start = async (candidate) => {
     const kernel = await createKernel({ ...candidate, expectedVersions: candidate.managed ? { ...MANAGED_VERSIONS } : undefined });
     try {
@@ -30,7 +30,7 @@ export async function launchPython({ runtimeDir, pythonOverride = process.env.PI
   };
   if (pythonOverride) return start({ pythonPath: pythonOverride, managed: false, environmentId: "override" });
   if (process.platform !== "linux" || process.arch !== "x64") {
-    throw new Error("managed Python currently supports Linux x64 only; set PI_HARNESS_PYTHON to a compatible interpreter");
+    throw new Error("managed Python currently supports Linux x64 only; set HARNESS_PYTHON to a compatible interpreter");
   }
   const environment = runtimeEnvironment(runtimeDir, skills);
   const candidates = [];

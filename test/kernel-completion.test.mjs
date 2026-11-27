@@ -44,7 +44,7 @@ for line in control.makefile("rb"):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         keep_writing()
 `);
-  const kernel = new PythonKernel({ pythonPath: process.env.PI_HARNESS_PYTHON || "python3",
+  const kernel = new PythonKernel({ pythonPath: process.env.HARNESS_PYTHON || "python3",
     kernelScript: script, runtimeSupportDir: root, cwd: root, stateDir: path.join(root, "state"),
     manifest: { version: 1, skills: [] }, hostHandlers: {}, shutdownTimeoutMs: 30, killTimeoutMs: 30 });
   t.after(async () => { kernel.terminateForRecovery(); await kernel.close({ snapshot: false }); await rm(root, { recursive: true, force: true }); });

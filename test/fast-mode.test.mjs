@@ -226,7 +226,7 @@ test("cycle-member session projection terminates and preserves acyclic/deleted d
   `;
   const output = execFileSync(process.execPath, ["--input-type=module", "-e", script, dir], {
     timeout: 120_000, killSignal: "SIGKILL", maxBuffer: 64 * 1024, encoding: "utf8",
-    env: { ...process.env, HOME: dir, PI_CODING_AGENT_DIR: path.join(dir, "agent") },
+    env: { ...process.env, HOME: dir, HARNESS_DIR: path.join(dir, "agent") },
   });
   assert.equal(output.trim(), "bounded descendant projections passed");
 });

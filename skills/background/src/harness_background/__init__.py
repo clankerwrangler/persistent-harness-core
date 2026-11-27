@@ -21,7 +21,7 @@ from typing import Any, Iterator
 
 INSTRUCTIONS_PATH = __harness_instructions_path__ if "__harness_instructions_path__" in globals() else None
 
-_AGENT_ROOT = Path(os.environ.get("PI_CODING_AGENT_DIR") or (Path.home() / ".pi" / "agent"))
+_AGENT_ROOT = Path(os.environ.get("HARNESS_DIR") or (Path.home() / ".harness"))
 STORE_ROOT = _AGENT_ROOT / "state" / "background-jobs"
 SUPERVISOR_PATH = Path(__file__).resolve().parent / "supervisor.py"
 SCHEMA = "background.job.v1"
@@ -287,7 +287,7 @@ def _validate_log_path(value: Any) -> str | None:
 
 
 def _notification_context() -> dict[str, str]:
-    session_id = os.environ.get("PI_HARNESS_ACTOR_ID")
+    session_id = os.environ.get("HARNESS_ACTOR_ID")
     if (not isinstance(session_id, str) or not session_id or len(session_id) > MAX_SESSION_ID_LEN
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", session_id)):
         return {}
@@ -301,7 +301,7 @@ def _allowlist_env(cwd: str, job_id: str) -> dict[str, str]:
         if item is not None:
             env[key] = item
     env["PWD"] = cwd
-    env["PI_BACKGROUND_JOB_ID"] = job_id
+    env["HARNESS_BACKGROUND_JOB_ID"] = job_id
     env.setdefault("PATH", "/usr/bin:/bin")
     return env
 
@@ -332,7 +332,7 @@ def _reap(pid: int) -> None:
 
 def _has_job_token(pid: int, job_id: str) -> bool:
     data = Path(f"/proc/{pid}/environ").read_bytes()
-    needle = b"PI_BACKGROUND_JOB_ID=" + job_id.encode("ascii", "strict")
+    needle = b"HARNESS_BACKGROUND_JOB_ID=" + job_id.encode("ascii", "strict")
     return any(entry == needle for entry in data.split(b"\0"))
 
 

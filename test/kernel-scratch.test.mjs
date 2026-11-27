@@ -20,10 +20,10 @@ test("managed kernel and host shell receive canonical scratch; restored names ca
     cwd: root, stateDir: path.join(root, "state"), manifest, scratch,
     hostHandlers: createHostHandlers({ cwd: root, scratch, getClient: () => null, getManifest: () => manifest }) };
   const first = new PythonKernel(options); kernels.push(first);
-  const value = await first.execute("import os\n(str(scratch_dir), os.environ.get('PI_HARNESS_ROOT_SESSION_ID'), os.environ.get('PI_HARNESS_SCRATCH_DIRECTORY'))");
+  const value = await first.execute("import os\n(str(scratch_dir), os.environ.get('HARNESS_ROOT_SESSION_ID'), os.environ.get('HARNESS_SCRATCH_DIRECTORY'))");
   assert.equal(value.ok, true);
   assert.equal(value.mime["text/plain"], `('${scratch.directory}', '${scratch.rootSessionId}', '${scratch.directory}')`);
-  const shell = await first.execute(`from _persistent_harness import host_request\nhost_request("shell.run", {"command": "printf '%s' \\\"$PI_HARNESS_ROOT_SESSION_ID\\\"", "timeout": 5})["stdout"]`);
+  const shell = await first.execute(`from _persistent_harness import host_request\nhost_request("shell.run", {"command": "printf '%s' \\\"$HARNESS_ROOT_SESSION_ID\\\"", "timeout": 5})["stdout"]`);
   assert.equal(shell.ok, true);
   assert.equal(shell.mime["text/plain"], `'${scratch.rootSessionId}'`);
   const shellScore = await first.execute(`from _persistent_harness import host_request\nhost_request("shell.run", {"command": "printf '%s' \\\"$(cat /proc/self/oom_score_adj)\\\"", "timeout": 5})["stdout"]`);

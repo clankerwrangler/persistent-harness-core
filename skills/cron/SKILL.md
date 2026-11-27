@@ -65,7 +65,7 @@ await cron(
 
 Clear a pin with `provider=None, model=None` on `update`. `thinking_level` pins or clears the same way.
 
-Naive ISO timestamps and cron expressions use the supervisor's configured default timezone (`PI_HARNESS_CRON_TIMEZONE`, otherwise `UTC`) unless `timezone` is supplied in the schedule. Explicit ISO offsets remain absolute. Cron expressions must contain exactly five fields. Recurring intervals must be at least 300 seconds.
+Naive ISO timestamps and cron expressions use the supervisor's configured default timezone (`HARNESS_CRON_TIMEZONE`, otherwise `UTC`) unless `timezone` is supplied in the schedule. Explicit ISO offsets remain absolute. Cron expressions must contain exactly five fields. Recurring intervals must be at least 300 seconds.
 
 Unpinned jobs use the global default model at the moment they fire, not the model that was current when the job was created. An explicit `provider` and `model` pin that model for later fires. `provider` and `model` must be supplied together.
 

@@ -12,9 +12,9 @@ const NOTIFICATION_FILE = "notification.json";
 const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function defaultBackgroundJobsDirectory(env = process.env) {
-  const root = typeof env.PI_CODING_AGENT_DIR === "string" && env.PI_CODING_AGENT_DIR
-    ? env.PI_CODING_AGENT_DIR
-    : path.join(os.homedir(), ".pi", "agent");
+  const root = typeof env.HARNESS_DIR === "string" && env.HARNESS_DIR
+    ? env.HARNESS_DIR
+    : path.join(os.homedir(), ".harness");
   return path.join(root, "state", "background-jobs");
 }
 
@@ -63,7 +63,7 @@ async function isActiveProcess(meta) {
   if (meta.kind === "launched") {
     try {
       const environment = await readBoundedText(`/proc/${meta.pid}/environ`);
-      if (environment === null || !environment.split("\0").includes(`PI_BACKGROUND_JOB_ID=${meta.id}`)) return false;
+      if (environment === null || !environment.split("\0").includes(`HARNESS_BACKGROUND_JOB_ID=${meta.id}`)) return false;
     } catch {
       // Match the skill: an unreadable environment does not invalidate a matching PID/starttime.
     }

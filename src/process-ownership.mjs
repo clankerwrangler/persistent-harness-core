@@ -12,7 +12,7 @@ function parseProcStat(content) {
 }
 
 function hasEnvironmentToken(buffer, token) {
-  const expected = Buffer.from(`PI_HARNESS_ACTOR_TOKEN=${token}`);
+  const expected = Buffer.from(`HARNESS_ACTOR_TOKEN=${token}`);
   return buffer.toString("utf8").split("\0").some((entry) => Buffer.from(entry).equals(expected));
 }
 
@@ -115,7 +115,7 @@ export async function quiescentScratchProcessRoots(rootIds, { maxProcesses = 409
         if (["Z", "X", "x"].includes(first[0])) continue;
         // Extract only exact root markers. Environment bytes remain local and ephemeral.
         const environment = await boundedRead(`${base}/environ`, 64 * 1024);
-        const prefix = "PI_HARNESS_ROOT_SESSION_ID=";
+        const prefix = "HARNESS_ROOT_SESSION_ID=";
         const found = environment.toString("utf8").split("\0").filter(value => value.startsWith(prefix))
           .map(value => value.slice(prefix.length)).filter(value => roots.has(value));
         const after = (await boundedRead(`${base}/stat`, 4096)).toString("utf8");

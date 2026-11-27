@@ -73,7 +73,7 @@ def _env_for(cwd: str, job_id: str) -> dict[str, str]:
         if value is not None:
             env[key] = value
     env["PWD"] = cwd
-    env["PI_BACKGROUND_JOB_ID"] = job_id
+    env["HARNESS_BACKGROUND_JOB_ID"] = job_id
     env.setdefault("PATH", "/usr/bin:/bin")
     return env
 
@@ -138,7 +138,7 @@ def main(argv: list[str]) -> int:
     except OSError:
         _write_exit(job_dir, 127, None)
         return 127
-    os.environ["PI_BACKGROUND_JOB_ID"] = job_id
+    os.environ["HARNESS_BACKGROUND_JOB_ID"] = job_id
     try:
         os.setsid()
     except OSError:

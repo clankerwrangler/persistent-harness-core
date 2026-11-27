@@ -28,12 +28,12 @@ function assertPrefixError(error, code, status) {
   assert.equal(error.status, status);
 }
 
-test("prompt prefix path uses PI_CODING_AGENT_DIR then the default agent dir", () => {
+test("prompt prefix path uses HARNESS_DIR then the default agent dir", () => {
   assert.equal(
-    promptPrefixPath({ PI_CODING_AGENT_DIR: "/tmp/agent-home" }),
+    promptPrefixPath({ HARNESS_DIR: "/tmp/agent-home" }),
     path.join("/tmp/agent-home", "state", "prompt-prefix.json"),
   );
-  assert.equal(promptPrefixPath({}), path.join(os.homedir(), ".pi", "agent", "state", "prompt-prefix.json"));
+  assert.equal(promptPrefixPath({}), path.join(os.homedir(), ".harness", "state", "prompt-prefix.json"));
 });
 
 test("missing prompt prefix file is a disabled empty record", async (t) => {

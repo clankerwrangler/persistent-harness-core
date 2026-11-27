@@ -101,9 +101,9 @@ export class CoreWorker {
   #closed;
   constructor({ core, options, env, cwd, broker, publish, agentDir }) {
     Object.assign(this, { core, options, env, cwd, broker, publish, agentDir });
-    this.sessionId = env.PI_HARNESS_ACTOR_ID;
-    this.actorToken = env.PI_HARNESS_ACTOR_TOKEN;
-    this.actorGeneration = Number(env.PI_HARNESS_ACTOR_GENERATION);
+    this.sessionId = env.HARNESS_ACTOR_ID;
+    this.actorToken = env.HARNESS_ACTOR_TOKEN;
+    this.actorGeneration = Number(env.HARNESS_ACTOR_GENERATION);
     this.selected = { model: null, reasoning: null };
     this.models = [];
     this.followUps = [];
@@ -234,7 +234,7 @@ export class CoreWorker {
 
   async #register() {
     const { env } = this;
-    this.client = new HarnessClient({ socketPath: env.PI_HARNESS_SOCKET || path.join(this.agentDir, "harness", "supervisor.sock"),
+    this.client = new HarnessClient({ socketPath: env.HARNESS_SOCKET || path.join(this.agentDir, "harness", "supervisor.sock"),
       reconnectBaseMs: 100, reconnectMaxMs: 2000, requestTimeoutMs: 30_000 });
     this.client.on("status", ({ state }) => { if (state === "connected") this.#restoreProgress(); });
     this.client.on("event", (frame) => {
@@ -534,9 +534,9 @@ export class CoreWorker {
           pythonPath: runtime.pythonPath, expectedVersions: runtime.expectedVersions,
           kernelScript: KERNEL_SCRIPT, runtimeSupportDir: PYTHON_RUNTIME_SUPPORT,
           cwd: this.cwd, stateDir: `${this.options.sidecarBase}.kernel-state`, manifest, scratch: this.scratch,
-          shutdownTimeoutMs: Number(this.env.PI_HARNESS_KERNEL_SHUTDOWN_TIMEOUT_MS ?? 1500),
-          killTimeoutMs: Number(this.env.PI_HARNESS_KERNEL_KILL_TIMEOUT_MS ?? 1000),
-          interruptTimeoutMs: Number(this.env.PI_HARNESS_KERNEL_INTERRUPT_TIMEOUT_MS ?? 2000),
+          shutdownTimeoutMs: Number(this.env.HARNESS_KERNEL_SHUTDOWN_TIMEOUT_MS ?? 1500),
+          killTimeoutMs: Number(this.env.HARNESS_KERNEL_KILL_TIMEOUT_MS ?? 1000),
+          interruptTimeoutMs: Number(this.env.HARNESS_KERNEL_INTERRUPT_TIMEOUT_MS ?? 2000),
           hostHandlers: createHostHandlers({ cwd: this.cwd, scratch: this.scratch, getClient: () => this.client,
             getContext: () => context, getManifest: () => this.manifest, getKernel: () => this.kernel,
             getKernelRestore: () => this.lastRestore,

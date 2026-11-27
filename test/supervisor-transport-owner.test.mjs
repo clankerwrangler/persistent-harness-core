@@ -32,7 +32,7 @@ async function fixture(t, options = {}) {
   const socketPath = path.join(root, "run", "supervisor.sock");
   const supervisor = new HarnessSupervisor({ socketPath, databasePath: path.join(root, "state", "harness.sqlite"),
     pidPath: path.join(root, "run", "supervisor.pid"), backgroundJobsDirectory: path.join(root, "background-jobs"),
-    skillsPath: process.env.PI_HARNESS_SKILLS_PATH || path.resolve(import.meta.dirname, "../skills"),
+    skillsPath: process.env.HARNESS_SKILLS_PATH || path.resolve(import.meta.dirname, "../skills"),
     actorInactivityMs: 0, actorFactory: () => { throw new Error("unexpected actor launch in transport fixture"); },
     logger: { error() {} }, ...options });
   await supervisor.start();

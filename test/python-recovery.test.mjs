@@ -88,13 +88,13 @@ test("ordinary mode still restores diagnostics for earlier native history", asyn
 });
 
 test("worker blocks a call planned before replacement and admits a later informed call", async (t) => {
-  const enabled = process.env.PI_HARNESS_NATIVE_ASYNC;
-  process.env.PI_HARNESS_NATIVE_ASYNC = "1";
-  t.after(() => { if (enabled === undefined) delete process.env.PI_HARNESS_NATIVE_ASYNC; else process.env.PI_HARNESS_NATIVE_ASYNC = enabled; });
+  const enabled = process.env.HARNESS_NATIVE_ASYNC;
+  process.env.HARNESS_NATIVE_ASYNC = "1";
+  t.after(() => { if (enabled === undefined) delete process.env.HARNESS_NATIVE_ASYNC; else process.env.HARNESS_NATIVE_ASYNC = enabled; });
   const entries = [result("prior", { namespaceCheckpoint: identity("prior") })];
   const core = Object.assign(new EventEmitter(), { history: async () => structuredClone(entries) });
   const worker = new CoreWorker({ core, options: { sessionDir: "/unused", sidecarBase: "/unused" },
-    env: { PI_HARNESS_ACTOR_ID: "s", PI_HARNESS_ACTOR_GENERATION: "1" }, cwd: "/tmp", agentDir: "/tmp",
+    env: { HARNESS_ACTOR_ID: "s", HARNESS_ACTOR_GENERATION: "1" }, cwd: "/tmp", agentDir: "/tmp",
     broker: { ui: {} }, publish() {} });
   const model = { provider: "openai-codex", id: "gpt-6.1-sol", api: "openai-codex-responses", compat: { supportsAsyncTools: true } };
   worker.models = [model]; worker.selected = { model, reasoning: "high" }; worker.depth = 1;

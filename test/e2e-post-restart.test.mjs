@@ -212,7 +212,7 @@ test("teardown discovers actor process groups from supervisor descendants", () =
 test("teardown waits for detached supervisor publication when control is unavailable", { timeout: 180000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "harness-post-restart-publication-"));
   const socketPath = path.join(root, "run", "supervisor.sock"); const databasePath = path.join(root, "state", "harness.sqlite"); const pidPath = path.join(root, "run", "supervisor.pid");
-  const env = { ...sanitizedRestartEnvironment(process.env), PI_HARNESS_SCRATCH_ROOT: path.join(root, "scratch"), PI_CODING_AGENT_DIR: path.join(root, "agent"), PI_HARNESS_AUTO_INSTALL: process.env.PI_HARNESS_AUTO_INSTALL ?? "0" };
+  const env = { ...sanitizedRestartEnvironment(process.env), HARNESS_SCRATCH_ROOT: path.join(root, "scratch"), HARNESS_DIR: path.join(root, "agent"), HARNESS_AUTO_INSTALL: process.env.HARNESS_AUTO_INSTALL ?? "0" };
   let daemon = null;
   const publication = (async () => {
     await sleep(250);
@@ -276,8 +276,8 @@ test("external restart revives and nudges the initiating session exactly once", 
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert(address && typeof address === "object");
-  const env = { ...sanitizedRestartEnvironment(process.env), PI_HARNESS_SCRATCH_ROOT: path.join(root, "scratch"), PI_CODING_AGENT_DIR: agentDir, PI_HARNESS_SOCKET: socketPath, PI_HARNESS_DATABASE: databasePath, PI_HARNESS_PID: pidPath,
-    ...await coreFakeProvider(root, `http://127.0.0.1:${address.port}/v1`), PI_HARNESS_ACTOR_INACTIVITY_MS: "0", PI_HARNESS_AUTO_INSTALL: process.env.PI_HARNESS_AUTO_INSTALL ?? "0" };
+  const env = { ...sanitizedRestartEnvironment(process.env), HARNESS_SCRATCH_ROOT: path.join(root, "scratch"), HARNESS_DIR: agentDir, HARNESS_SOCKET: socketPath, HARNESS_DATABASE: databasePath, HARNESS_PID: pidPath,
+    ...await coreFakeProvider(root, `http://127.0.0.1:${address.port}/v1`), HARNESS_ACTOR_INACTIVITY_MS: "0", HARNESS_AUTO_INSTALL: process.env.HARNESS_AUTO_INSTALL ?? "0" };
   const daemon = spawn(process.execPath, [supervisorBin, "start", "--socket", socketPath, "--db", databasePath, "--pid", pidPath], { env, stdio: ["ignore", "pipe", "pipe"] });
   await waitLine(daemon.stdout); const oldPid = daemon.pid;
   expectedSupervisor = await processIdentity(oldPid); assert(expectedSupervisor);
@@ -285,7 +285,7 @@ test("external restart revives and nudges the initiating session exactly once", 
   const admitted = (await ui.request("create_root", { cwd, repositoryRoot: null, name: "restart-root", provider: "harness-fake", model: "fake-model", thinkingLevel: null })).admission;
   await ui.request("subscribe_session", { selector: admitted.sessionId });
   await submitAndSettle(ui, admitted.sessionId, "before restart");
-  const scratchPath = path.join(env.PI_HARNESS_SCRATCH_ROOT, admitted.sessionId);
+  const scratchPath = path.join(env.HARNESS_SCRATCH_ROOT, admitted.sessionId);
   const scratchBefore = await lstat(scratchPath);
   assert(scratchBefore.isDirectory(), "the real restart fixture must allocate private scratch");
   const before = (await ui.request("get_status")).sessions.find((item) => item.sessionId === admitted.sessionId);
@@ -307,7 +307,7 @@ test("external restart revives and nudges the initiating session exactly once", 
   assert.equal(history.entries.filter((entry) => entry.type === "message" && entry.message?.role === "user" && JSON.stringify(entry).includes(POST_RESTART_NUDGE)).length, 1);
   // Simulate a worker crash after submit_input succeeded but before the terminal job update.
   await writeFile(scheduled.jobPath, `${JSON.stringify({ ...completedJob, state: "nudging" }, null, 2)}\n`, { mode: 0o600 });
-  const replayWorkers = await Promise.allSettled([1, 2].map(() => execFileAsync(process.execPath, [restartBin, "--worker", scheduled.jobPath], { env: { ...env, PI_HARNESS_RESTART_WORKER: "1" }, timeout: 120_000 })));
+  const replayWorkers = await Promise.allSettled([1, 2].map(() => execFileAsync(process.execPath, [restartBin, "--worker", scheduled.jobPath], { env: { ...env, HARNESS_RESTART_WORKER: "1" }, timeout: 120_000 })));
   assert(replayWorkers.some((result) => result.status === "fulfilled"));
   const replayedJob = JSON.parse(await readFile(scheduled.jobPath, "utf8")); assert.equal(replayedJob.state, "complete");
   const replayedHistory = await ui2.request("get_actor_entries", { sessionId: admitted.sessionId, since: null });

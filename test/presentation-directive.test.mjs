@@ -26,7 +26,7 @@ test("a configured namespace preserves streaming, validation, and history marker
     }
     assert.equal((marker + "History.").replace(PRESENTATION_HISTORY_PREFIX, ""), "History.");
     assert(!isPresentation({ schema: "unrelated.presentation.v1", body: "happy", face: "smile" }));
-  `], { env: { ...process.env, PI_HARNESS_PRESENTATION_NAMESPACE: "example-agent" }, encoding: "utf8" });
+  `], { env: { ...process.env, HARNESS_PRESENTATION_NAMESPACE: "example-agent" }, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
 });
 
@@ -34,10 +34,10 @@ test("configured namespaces reject markup and regular-expression syntax", () => 
   const moduleUrl = new URL("../src/presentation-directive.mjs", import.meta.url).href;
   for (const namespace of ["bad.*", "bad -->", "a".repeat(33)]) {
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", `import ${JSON.stringify(moduleUrl)};`], {
-      env: { ...process.env, PI_HARNESS_PRESENTATION_NAMESPACE: namespace }, encoding: "utf8",
+      env: { ...process.env, HARNESS_PRESENTATION_NAMESPACE: namespace }, encoding: "utf8",
     });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /PI_HARNESS_PRESENTATION_NAMESPACE must be/);
+    assert.match(result.stderr, /HARNESS_PRESENTATION_NAMESPACE must be/);
   }
 });
 

@@ -34,8 +34,8 @@ test("Gate P: unified roots and children survive detach, navigate directly, mult
     writeFile(path.join(agentDir, "AGENTS.depth-2.md"), "LEVEL_TWO_SCOPE"),
   ]);
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
-  const previous = Object.fromEntries(["PI_CODING_AGENT_DIR", "PI_HARNESS_AUTO_INSTALL", "PI_HARNESS_CORE_ARGS", "PI_HARNESS_CORE_SESSIONS"].map((key) => [key, process.env[key]]));
-  process.env.PI_CODING_AGENT_DIR = agentDir; process.env.PI_HARNESS_AUTO_INSTALL ??= "0";
+  const previous = Object.fromEntries(["HARNESS_DIR", "HARNESS_AUTO_INSTALL", "HARNESS_CORE_ARGS", "HARNESS_CORE_SESSIONS"].map((key) => [key, process.env[key]]));
+  process.env.HARNESS_DIR = agentDir; process.env.HARNESS_AUTO_INSTALL ??= "0";
   t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
 
   let releaseA; let sawHoldA; const holdASeen = new Promise((resolve) => { sawHoldA = resolve; }); const holdA = new Promise((resolve) => { releaseA = resolve; }); let heldA = false; t.after(() => releaseA?.());
@@ -159,7 +159,7 @@ test("Gate P: unified roots and children survive detach, navigate directly, mult
 
   const sessions = supervisor.store.listSessions(); assert(sessions.some((item) => item.kind === "root") && sessions.some((item) => item.kind === "child"));
   for (const session of sessions) {
-    assert.equal(path.dirname(session.sessionFile), process.env.PI_HARNESS_CORE_SESSIONS);
+    assert.equal(path.dirname(session.sessionFile), process.env.HARNESS_CORE_SESSIONS);
     assert.equal(session.sessionFile.includes("child-artifacts"), false); assert.equal(session.sessionFile.includes("pi-sessions"), false);
   }
   const aPaths = sessionSidecarPaths(supervisor.store.getSession(rootA.sessionId).sessionFile);

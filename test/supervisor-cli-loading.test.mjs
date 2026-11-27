@@ -69,8 +69,8 @@ if (${holdExit} && process.argv[2] === "start") process.once("beforeExit", () =>
 globalThis.__harnessCliEvaluation = url => appendFileSync(${JSON.stringify(trace)}, JSON.stringify({pid:process.pid,command:process.argv[2]??"import",url})+"\\n");
 registerHooks({load(url,context,nextLoad){const result=nextLoad(url,context);if(result.format==="module"&&url.startsWith(${JSON.stringify(pathToFileURL(path.join(packageRoot, "src") + path.sep).href)})){const source=typeof result.source==="string"?result.source:Buffer.from(result.source).toString("utf8");return {...result,source:"globalThis.__harnessCliEvaluation("+JSON.stringify(url)+");\\n"+source};}return result;}});
 `);
-  const env = { PATH: process.env.PATH, HOME: root, PI_CODING_AGENT_DIR: agent, PI_HARNESS_SKILLS_PATH: skills,
-    PI_OFFLINE: "1", PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1", PI_HARNESS_AUTO_INSTALL: "0", UV_OFFLINE: "1",
+  const env = { PATH: process.env.PATH, HOME: root, HARNESS_DIR: agent, HARNESS_SKILLS_PATH: skills,
+    PI_OFFLINE: "1", PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1", HARNESS_AUTO_INSTALL: "0", UV_OFFLINE: "1",
     NODE_OPTIONS: `--max-old-space-size=256 --import=${pathToFileURL(observer).href}` };
   const children = new Map(), sockets = new Set(); let server, closing;
   const held = Promise.withResolvers();

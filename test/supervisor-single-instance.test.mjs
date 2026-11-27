@@ -24,7 +24,7 @@ async function harnessPaths(t) {
 function startDaemon(paths) {
   const child = spawn(process.execPath, [supervisorBin, "start",
     "--socket", paths.socketPath, "--db", paths.databasePath, "--pid", paths.pidPath],
-  { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PI_CODING_AGENT_DIR: paths.root } });
+  { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, HARNESS_DIR: paths.root } });
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (chunk) => { stdout += chunk; });

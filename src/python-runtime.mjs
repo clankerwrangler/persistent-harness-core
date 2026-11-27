@@ -123,7 +123,7 @@ async function acquireInstallLock(lockPath, timeoutMs = 180_000) {
 export class PythonRuntimeManager {
   #ensurePromise;
 
-  constructor({ runtimeDir, pythonOverride = process.env.PI_HARNESS_PYTHON }) {
+  constructor({ runtimeDir, pythonOverride = process.env.HARNESS_PYTHON }) {
     this.runtimeDir = runtimeDir;
     this.pythonOverride = pythonOverride;
   }
@@ -164,7 +164,7 @@ export class PythonRuntimeManager {
       return validate({ pythonPath: this.pythonOverride, managed: false, environmentId: "override" });
     }
     if (process.platform !== "linux" || process.arch !== "x64") {
-      throw new Error("managed Python currently supports Linux x64 only; set PI_HARNESS_PYTHON to a compatible interpreter");
+      throw new Error("managed Python currently supports Linux x64 only; set HARNESS_PYTHON to a compatible interpreter");
     }
 
     const { dependencies, environmentSpec, environmentId, environmentDir, pythonPath, completePath } = runtimeEnvironment(this.runtimeDir, skills);
@@ -190,7 +190,7 @@ export class PythonRuntimeManager {
       if (completedAfterLock) return completedAfterLock;
       const compatibleAfterLock = await this.#findCompatibleCompleted(dependencies, validate, isRuntimeRejection);
       if (compatibleAfterLock) return compatibleAfterLock;
-      const allowed = process.env.PI_HARNESS_AUTO_INSTALL === "1" || await consent({
+      const allowed = process.env.HARNESS_AUTO_INSTALL === "1" || await consent({
         pythonVersion: PYTHON_VERSION,
         packages: [`ipython==${IPYTHON_VERSION}`, `dill==${DILL_VERSION}`, ...dependencies],
       });

@@ -279,7 +279,7 @@ test("actual host-backed files attachment reaches the paired formatter through e
   t.after(() => rm(root, { recursive: true, force: true }));
   const imagePath = path.join(root, "actual-attachment.png");
   await writeFile(imagePath, Buffer.from(PNG_A, "base64"));
-  const skills = process.env.PI_HARNESS_SKILLS_PATH || path.resolve(support, "../skills");
+  const skills = process.env.HARNESS_SKILLS_PATH || path.resolve(support, "../skills");
   const catalog = await discoverSkills([{ source: "skill", path: path.join(skills, "files/SKILL.md") }]);
   assert.deepEqual(catalog.diagnostics, []);
   const kernel = await fixture(t, { manifest: manifestForSkills(catalog.skills), hostHandlers: createHostHandlers({ cwd: root }) });

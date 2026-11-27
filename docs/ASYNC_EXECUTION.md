@@ -2,7 +2,7 @@
 
 Ordinary tools use a terminal-response barrier. The native path can start a fully completed Python call while the provider response is still streaming, then continue inference or steering while Python remains pending.
 
-Enable the native policy with `PI_HARNESS_NATIVE_ASYNC=1`. The current policy specifically admits `openai-codex/gpt-6-astra` on `openai-codex-responses` with `model.compat.supportsAsyncTools === true`. The tool definition must opt in, the effective outgoing request must advertise it, and the actual completed raw provider item must return its async opt-in. A serialized `async` property or a partial event alone is not proof. Other models continue through ordinary execution; this switch does not make an unsupported provider asynchronous.
+Enable the native policy with `HARNESS_NATIVE_ASYNC=1`. The current policy specifically admits `openai-codex/gpt-6-astra` on `openai-codex-responses` with `model.compat.supportsAsyncTools === true`. The tool definition must opt in, the effective outgoing request must advertise it, and the actual completed raw provider item must return its async opt-in. A serialized `async` property or a partial event alone is not proof. Other models continue through ordinary execution; this switch does not make an unsupported provider asynchronous.
 
 The adapter owns raw SSE or header-capable WebSocket transport and composes the unmodified stock public Responses parser. Complete calls are admitted in source order, even if item-completion events arrive out of order. A source prefix is durable before execution; a late reasoning backfill becomes selected canonical metadata rather than a rewritten prefix. Open text keeps its identity across prefix segmentation.
 

@@ -16,7 +16,7 @@ const exists = async (file) => readFile(file).then(() => true, error => { if (er
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "runtime-launch-"));
-  const pythonPath = process.env.PI_HARNESS_PYTHON || (await new PythonRuntimeManager({ runtimeDir: path.join(root, "prerequisite") })
+  const pythonPath = process.env.HARNESS_PYTHON || (await new PythonRuntimeManager({ runtimeDir: path.join(root, "prerequisite") })
     .ensure({ skills: [], consent: async () => true })).pythonPath;
   const source = path.join(root, "catalog", "witness", "src");
   await mkdir(source, { recursive: true });

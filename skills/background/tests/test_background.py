@@ -44,7 +44,7 @@ class BackgroundTests(unittest.TestCase):
         self.store = Path(self.temp.name) / "background-jobs"
         self.store_patch = patch.object(bg, "STORE_ROOT", self.store)
         self.store_patch.start()
-        self.env_patch = patch.dict(os.environ, {"PI_HARNESS_ACTOR_ID": "", "PI_HARNESS_SOCKET": ""})
+        self.env_patch = patch.dict(os.environ, {"HARNESS_ACTOR_ID": "", "HARNESS_SOCKET": ""})
         self.env_patch.start()
         self.tracked = []
 
@@ -254,7 +254,7 @@ class BackgroundTests(unittest.TestCase):
         self.assertIn("\ufffd", bigger["log"])
 
     def test_launch_records_owner_session_for_supervisor_delivery(self):
-        with patch.dict(os.environ, {"PI_HARNESS_ACTOR_ID": "session-test"}):
+        with patch.dict(os.environ, {"HARNESS_ACTOR_ID": "session-test"}):
             job = self.op("launch", command="true", name="notify-job")
             meta_path = self.store / job["id"] / "meta.json"
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
